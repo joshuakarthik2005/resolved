@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resolved. — video title cards</title>
+<link rel="icon" type="image/svg+xml" href="/static/mark.svg">
+<link rel="stylesheet" href="/static/app.css">
+<!-- Title cards for the submission video only (served at /video). Strip after submission. -->
+<style>
+  body{min-height:100vh; display:flex; align-items:center; justify-content:center;
+       background:var(--paper); margin:0}
+  .card{max-width:980px; padding:var(--s7) var(--s8); background:var(--sheet);
+        border:1px solid var(--rule); border-radius:3px; box-shadow:var(--shadow)}
+  .card .kicker{font:500 18px/1.3 var(--ui); color:var(--ink-soft); margin:0 0 var(--s4)}
+  .card h1{font:600 46px/1.2 var(--doc); margin:0 0 var(--s5); color:var(--ink)}
+  .card p{font:400 27px/1.55 var(--doc); margin:0; color:var(--ink)}
+  .card p + p{margin-top:var(--s4)}
+  .card .rule{border-top:2px solid var(--ink); margin:var(--s5) 0}
+  .card b{color:var(--authority)}
+  .wordmark{font:600 30px/1 var(--doc); margin:0 0 var(--s5)}
+  .wordmark em{font-style:normal; color:var(--authority)}
+  [hidden]{display:none}
+</style>
+</head>
+<body>
+
+<section class="card" id="card1" hidden>
+  <p class="wordmark">Resolved<em>.</em></p>
+  <p class="kicker">The problem</p>
+  <h1>A shop owner's UPI payment fails.</h1>
+  <div class="rule"></div>
+  <p>They message support. It sits in a queue for days, while RBI gives the bank until
+     <b>T+5</b> to put it right, and <b>₹100 a day</b> is owed after that.</p>
+</section>
+
+<section class="card" id="card2" hidden>
+  <p class="wordmark">Resolved<em>.</em></p>
+  <p class="kicker">How we solve it</p>
+  <h1>The model proposes. Code decides.</h1>
+  <div class="rule"></div>
+  <p>An LLM reads the message and proposes exactly one action.</p>
+  <p>A separate gate with no model in it runs five deterministic checks and rules
+     <b>approve</b>, <b>escalate</b> or <b>block</b>.</p>
+  <p>The model never moves money.</p>
+</section>
+
+<script>
+  const n = new URLSearchParams(location.search).get('card') || '1';
+  const el = document.getElementById('card' + n);
+  if(el) el.hidden = false;
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Render Blueprint: one free web service, deployed from GitHub.
+# The database is rebuilt on each start (free-tier disks are not kept between deploys),
+# so the demo data is always seeded for the current day.
+services:
+  - type: web
+    name: resolved
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python seed.py --if-stale && uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/stats
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      # "yesterday" and "today" in the demo lines, and the RBI clock, are Indian time.
+      - key: TZ
+        value: Asia/Kolkata
+      - key: PLANNER
+        value: sarvam
+      - key: USE_SARVAM_STT
+        value: "1"
+      - key: USE_SARVAM_TTS
+        value: "1"
+      # Set the value in the Render dashboard. Never in this file.
+      - key: SARVAM_API_KEY
+        sync: false

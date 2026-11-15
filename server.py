@@ -2016,6 +2016,12 @@ def judge_page():
     return FileResponse(os.path.join(STATIC, "judge.html"), headers=NO_CACHE)
 
 
+@app.get("/video")
+def video_page():
+    """Title cards for the submission video only (record_video.py). Strip after submission."""
+    return FileResponse(os.path.join(STATIC, "video.html"), headers=NO_CACHE)
+
+
 @app.get("/console")
 def console_page():
     return FileResponse(os.path.join(STATIC, "console.html"), headers=NO_CACHE)
@@ -2039,8 +2045,9 @@ if __name__ == "__main__":
         print(f"  The demo data was seeded on {st['seeded_on'] or 'an unknown day'}, not today.")
         print("  Lines like 'yesterday' will miss. Stop this, run:  python seed.py")
         print("!" * 74)
+    host = os.getenv("HOST", "0.0.0.0")
     print(f"Resolved. running on http://127.0.0.1:{port}     console: /console")
     print("planner:", model_name() if have_key() else
           "stand-in (set SARVAM_API_KEY or GROQ_API_KEY for a model)",
           "  - to use Groq instead:  set PLANNER=groq" if model_name().startswith("Sarvam") else "")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="warning")

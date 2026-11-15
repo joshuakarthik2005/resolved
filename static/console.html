@@ -55,6 +55,10 @@
   .audit-wrap td:nth-child(1){font-family:var(--num); color:var(--ink-soft); white-space:nowrap}
   .audit-wrap td:nth-child(2){font-family:var(--num); white-space:nowrap}
   .audit-wrap td:nth-child(5){color:var(--ink-soft)}
+  #fiveChecks td{font-family:var(--ui); white-space:normal; color:var(--ink); vertical-align:top}
+  #fiveChecks td:nth-child(1){font-family:var(--num); color:var(--ink-soft); width:4em}
+  #fiveChecks td:nth-child(2){width:46%}
+  #fiveChecks .num{font-family:var(--num)}
   .scroll{max-height:420px; overflow-y:auto}
   .due{color:var(--hold); font-weight:600}
   .checks li.knock{color:var(--ink-soft); font-weight:400}
@@ -117,6 +121,27 @@
       </div>
     </section>
   </div>
+
+  <section class="sheet audit-wrap" id="fiveChecks">
+    <header>
+      <h2>The five checks</h2>
+      <span class="meta">run by the gate on every case; no model in it</span>
+    </header>
+    <div class="scroll"><table><thead><tr>
+      <th>Check</th><th>What it asks</th><th>If it fails</th><th>Can a person approve past it?</th>
+    </tr></thead><tbody>
+      <tr><td>1</td><td>Is there exactly one payment, made to this shop, for the amount the shop claimed?</td>
+          <td>Refused. The wrong payment would be touched.</td><td>No</td></tr>
+      <tr><td>2</td><td>Is the amount at or under <span class="num" id="pcLimit">₹10,000</span>?</td>
+          <td>Sent to a person.</td><td>Yes, and the gate runs again</td></tr>
+      <tr><td>3</td><td>Does the money go only to the customer's own account, or the shop's own payout account?</td>
+          <td>Refused. Money would go somewhere it must not.</td><td>No</td></tr>
+      <tr><td>4</td><td>Is the action one we allow, reversible, and right for what the bank says happened?</td>
+          <td>Sent to a person, who can take the case or turn it down.</td><td>No</td></tr>
+      <tr><td>5</td><td>Has this shop had fewer than <span class="num" id="pcCap">5</span> automatic actions today?</td>
+          <td>Sent to a person.</td><td>Yes, and the gate runs again</td></tr>
+    </tbody></table></div>
+  </section>
 
   <section class="sheet audit-wrap">
     <header>
@@ -230,9 +255,10 @@ function caseRow([t,i]){
     <span class="amt">${money(t.claimed_amount)}</span>
     <span class="nm">${esc(t.merchant_name)}
       <span class="rs">${esc(reason)}</span>
-      ${c ? `<span class="rs ${c.due ? 'due' : ''}">${esc(c.short)}</span>` : ''}</span>
+      ${c ? `<span class="rs ${c.due ? 'due' : ''}">${esc(c.short)}</span>` : ''}
+      ${t.override && t.status !== 'FLAGGED'
+        ? '<span class="tag FLAGGED" style="margin-top:4px">override attempt</span>' : ''}</span>
     <span class="tag ${esc(t.status)}">${esc(t.status.replace('_',' ').toLowerCase())}</span>
-    ${t.override && t.status !== 'FLAGGED' ? '<span class="tag FLAGGED">override attempt</span>' : ''}
   </div>`;
 }
 
@@ -399,6 +425,13 @@ async function staleCheck(){
   }catch(e){}
 }
 staleCheck();
+// The two numbers a risk team can change, read from the live policy.
+fetch('/api/policy').then(r => r.json()).then(p => {
+  const raw = p.raw || {};
+  if(raw.auto_limit != null) $('#pcLimit').textContent = '₹' + Number(raw.auto_limit).toLocaleString('en-IN');
+  if(raw.daily_cap != null) $('#pcCap').textContent = String(raw.daily_cap);
+}).catch(() => {});
+
 refresh(); setInterval(refresh, 5000);
 </script>
 </body>
