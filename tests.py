@@ -1577,6 +1577,46 @@ def spoken_replies_fail_quietly_and_never_hold_up_the_text():
     assert 'USE_SARVAM_TTS = os.getenv("USE_SARVAM_TTS", "1") != "0"' in server_src
 
 
+# ------------------------------- the shop hears back when a person decides its case
+@test
+def shop_is_told_when_a_person_decides_its_case():
+    d = ticket("M004", BIG)                                         # Sri Lakshmi Mart, Tamil
+    assert call("POST", f"/api/queue/{d['ticket_id']}/decide", {"decision": "approve"})[0] == 200
+    _, th = call("GET", "/api/merchant/M004/thread")
+    assert [x["kind"] for x in th] == ["case", "notice"], th         # after the case, in order
+    note = th[-1]
+    assert d["ticket_id"] in note["reply"] and "18,400" in note["reply"], note["reply"]
+    assert TAMIL.search(note["reply"]) and note["reply_lang"] == "ta"
+    assert q("SELECT COUNT(*) n FROM audit WHERE event = 'SHOP_NOTIFIED'")[0]["n"] == 1
+    # turned down
+    reseed()
+    d = ticket("M004", BIG)
+    call("POST", f"/api/queue/{d['ticket_id']}/decide", {"decision": "reject"})
+    note = call("GET", "/api/merchant/M004/thread")[1][-1]
+    assert note["kind"] == "notice" and d["ticket_id"] in note["reply"] and "UTR" in note["reply"]
+    # a refused or undecided case sends nothing later
+    reseed()
+    ticket("M001", REDIRECT)
+    ticket("M004", BIG)
+    assert all(x["kind"] == "case" for x in call("GET", "/api/merchant/M001/thread")[1])
+    assert all(x["kind"] == "case" for x in call("GET", "/api/merchant/M004/thread")[1])
+    src = open(os.path.join(HERE, "static", "chat.html"), encoding="utf-8").read()
+    assert "p.kind === 'notice'" in src and "}, 5000);" in src
+
+
+@test
+def shop_is_told_when_a_person_takes_its_case():
+    p, url = start_server(extra=WRONG_MODEL)
+    try:
+        d = ticket("M002", ANU, url)                                  # check 4 only
+        assert call("POST", f"/api/queue/{d['ticket_id']}/decide", {"decision": "take"},
+                    url)[0] == 200
+        note = call("GET", "/api/merchant/M002/thread", base=url)[1][-1]
+        assert note["kind"] == "notice" and d["ticket_id"] in note["reply"], note
+    finally:
+        stop(p)
+
+
 @test
 def override_patterns_are_narrow():
     import server

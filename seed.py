@@ -21,6 +21,7 @@ DROP TABLE IF EXISTS ledger;
 DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS audit;
 DROP TABLE IF EXISTS meta;
+DROP TABLE IF EXISTS notices;
 
 CREATE TABLE merchants (
     merchant_id     TEXT PRIMARY KEY,
@@ -81,6 +82,16 @@ CREATE TABLE audit (
 CREATE TABLE meta (
     key             TEXT PRIMARY KEY,
     value           TEXT NOT NULL
+);
+
+-- messages Resolved sends the shop later, e.g. when a person decides an escalated case
+CREATE TABLE notices (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    merchant_id     TEXT NOT NULL,
+    ticket_id       TEXT,
+    created         TEXT NOT NULL,
+    reply           TEXT NOT NULL,
+    reply_lang      TEXT
 );
 """
 

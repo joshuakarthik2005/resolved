@@ -78,6 +78,7 @@ def migrate(path: str = DB) -> None:
         # U31 means "invalid UPI ID" (fails before any debit); the first rewrite misused it
         con.execute("UPDATE ledger SET npci_code = 'YD' WHERE npci_code = 'U31'")
         con.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        con.execute("CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY AUTOINCREMENT, merchant_id TEXT NOT NULL, ticket_id TEXT, created TEXT NOT NULL, reply TEXT NOT NULL, reply_lang TEXT)")
         for c, typ in (("txn_amount", "INTEGER"), ("txn_time", "TEXT"), ("extra", "TEXT")):
             if c not in cols("tickets"):
                 con.execute(f"ALTER TABLE tickets ADD COLUMN {c} {typ}")
@@ -762,6 +763,32 @@ REPLIES = {
         "ta": "என் சரிபார்ப்புகள் மாறாதவை; ஒரு செய்தியால் அவற்றை மாற்ற முடியாது. பணம் பற்றியது என்றால் தொகையும் நேரமும் சொல்லுங்கள்.",
         "hi": "मेरी जाँचें तय हैं, कोई संदेश उन्हें बदल नहीं सकता। भुगतान की बात हो तो राशि और समय बताइए।",
     },
+    # sent to the shop later, when a person decides a case that was escalated to them
+    "HUMAN_APPROVED_REVERSE_TO_SOURCE": {
+        "en": "Update on case {case}: our team has approved it. ₹{amt} has been returned to the customer — it reaches them within 24 hours. Reference: {utr}",
+        "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழு ஒப்புதல் அளித்துள்ளது. ₹{amt} வாடிக்கையாளருக்குத் திருப்பி அனுப்பப்பட்டது — 24 மணி நேரத்தில் சேரும். குறிப்பு: {utr}",
+        "hi": "केस {case} पर अपडेट: हमारी टीम ने इसे मंज़ूरी दे दी है। ₹{amt} ग्राहक को लौटा दिए गए हैं — 24 घंटे में पहुँच जाएँगे। संदर्भ: {utr}",
+    },
+    "HUMAN_APPROVED_MARK_PAID": {
+        "en": "Update on case {case}: our team has approved it. ₹{amt} has been credited to you and goes in your next settlement. Receipt: {utr}",
+        "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழு ஒப்புதல் அளித்துள்ளது. ₹{amt} உங்களுக்கு வரவு வைக்கப்பட்டது, அடுத்த செட்டில்மென்டில் சேரும். ரசீது: {utr}",
+        "hi": "केस {case} पर अपडेट: हमारी टीम ने इसे मंज़ूरी दे दी है। ₹{amt} आपके खाते में जमा हो गए हैं और अगले सेटलमेंट में आएँगे। रसीद: {utr}",
+    },
+    "HUMAN_APPROVED_REFUND_DUPLICATE": {
+        "en": "Update on case {case}: our team has approved it. The second payment of ₹{amt} has been returned to the customer; the first stays with you. Reference: {utr}",
+        "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழு ஒப்புதல் அளித்துள்ளது. ₹{amt} இரண்டாவது பணம் வாடிக்கையாளருக்குத் திருப்பி அனுப்பப்பட்டது; முதலாவது உங்களிடம் இருக்கும். குறிப்பு: {utr}",
+        "hi": "केस {case} पर अपडेट: हमारी टीम ने इसे मंज़ूरी दे दी है। ₹{amt} का दूसरा भुगतान ग्राहक को लौटा दिया गया है; पहला आपके पास रहेगा। संदर्भ: {utr}",
+    },
+    "HUMAN_REJECTED": {
+        "en": "Update on case {case}: our team has looked at it and cannot act on it. If you think this is wrong, reply with the UTR from the customer's app.",
+        "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழு பார்த்தது, இதில் செயல்பட முடியாது. இது தவறு என்று நினைத்தால், வாடிக்கையாளரின் ஆப்பிலுள்ள UTR-ஐ அனுப்புங்கள்.",
+        "hi": "केस {case} पर अपडेट: हमारी टीम ने इसे देखा है और इस पर कार्रवाई नहीं कर सकती। अगर आपको यह ग़लत लगे, तो ग्राहक के ऐप से UTR भेजिए।",
+    },
+    "HUMAN_TAKEN": {
+        "en": "Update on case {case}: a person on our team is handling it now and will settle it with the bank. You do not need to do anything.",
+        "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழுவில் ஒருவர் இதைக் கையாள்கிறார், வங்கியுடன் தீர்த்து வைப்பார். நீங்கள் எதுவும் செய்ய வேண்டியதில்லை.",
+        "hi": "केस {case} पर अपडेट: हमारी टीम का एक व्यक्ति इसे देख रहा है और बैंक के साथ सुलझाएगा। आपको कुछ करने की ज़रूरत नहीं।",
+    },
     "ASK_AMOUNT": {
         "en": "I can look into that. How much was the payment, and roughly when? The UTR from the customer's app is even better.",
         "ta": "பார்க்கிறேன். பணம் எவ்வளவு, எப்போது? வாடிக்கையாளரின் ஆப்பிலுள்ள UTR இருந்தால் இன்னும் நல்லது.",
@@ -859,7 +886,7 @@ def reply_text(key: str, lang: str, amt=None, utr=None, **kw) -> str:
         cyc_txt = pair[0 if cyc["today"] else 1].format(cut=cyc["cutoff"])
     return tpl.format(amt=f"{amt:,}" if amt else "—", utr=utr or "—", cycle=cyc_txt,
                       when=kw.pop("when", WHEN.get(lang, WHEN["en"])), **{
-                          "txn_amt": "—", "seen": "", "bad": "", "n": "", "note": "",
+                          "txn_amt": "—", "seen": "", "bad": "", "n": "", "note": "", "case": "",
                           "time": ""} | kw)
 
 
@@ -1247,6 +1274,22 @@ def _languages(say: Reply, lang: str, msg_lang: str, how: str) -> dict:
     return out
 
 
+def _tell_shop(con, t, key: str, txn_row: dict | None = None) -> None:
+    """A later message to the shop: what a person decided on its escalated case. A fixed
+    template in the shop's language, filled from the record. In production this goes out
+    over WhatsApp (a template message, if it is outside the 24-hour reply window)."""
+    m = con.execute("SELECT language FROM merchants WHERE merchant_id = ?",
+                    (t["merchant_id"],)).fetchone()
+    say = Reply(m["language"] if m else "en")
+    amt = (txn_row or {}).get("amount") or t["txn_amount"] or t["claimed_amount"]
+    text = say(key, amt, (txn_row or {}).get("utr") or t["utr"], case=t["ticket_id"])
+    con.execute("INSERT INTO notices (merchant_id, ticket_id, created, reply, reply_lang)"
+                " VALUES (?,?,?,?,?)", (t["merchant_id"], t["ticket_id"],
+                                        datetime.now().isoformat(timespec="seconds"), text,
+                                        say.used_lang()))
+    log(con, t["ticket_id"], "system", "SHOP_NOTIFIED", text[:200])
+
+
 def _tell_customer(con, ticket_id, action, txn_row, merchant) -> dict:
     """The other side of the dispute. Mock: no SMS gateway in this demo, so it is logged."""
     tpl = CUSTOMER_SMS.get(action)
@@ -1371,6 +1414,7 @@ def decide(ticket_id: str, body: DecisionIn):
                 con.execute("UPDATE tickets SET status = 'REJECTED' WHERE ticket_id = ?",
                             (ticket_id,))
                 log(con, ticket_id, "human", "REJECTED_ESCALATION", f"{body.who} rejected")
+                _tell_shop(con, t, "HUMAN_REJECTED")
                 con.execute("COMMIT")
                 return {"ok": True, "ticket_id": ticket_id, "decision": "reject"}
             if body.decision == "take":
@@ -1388,6 +1432,7 @@ def decide(ticket_id: str, body: DecisionIn):
                             (json.dumps(extra, ensure_ascii=False), ticket_id))
                 log(con, ticket_id, "human", "TAKEN_BY_PERSON",
                     f"{body.who} took the case off the agent; no money moved")
+                _tell_shop(con, t, "HUMAN_TAKEN")
                 con.execute("COMMIT")
                 return {"ok": True, "ticket_id": ticket_id, "decision": "take"}
 
@@ -1415,6 +1460,7 @@ def decide(ticket_id: str, body: DecisionIn):
                         (ticket_id,))
             log(con, ticket_id, "human", "APPROVED_ESCALATION", f"{body.who} approved")
             _tell_customer(con, ticket_id, t["action"], txn_row, merchant)
+            _tell_shop(con, t, f"HUMAN_APPROVED_{t['action']}", txn_row)
             con.execute("COMMIT")
         except BaseException:
             con.execute("ROLLBACK")
@@ -1452,20 +1498,30 @@ def merchant_thread(merchant_id: str, limit: int = 40):
                            (merchant_id,)).fetchone():
             raise HTTPException(404, "unknown merchant")
         rows = con.execute(
-            "SELECT ticket_id, message, reply, created, extra FROM tickets"
+            "SELECT ticket_id, message, reply, created, extra, rowid FROM tickets"
             " WHERE merchant_id = ? ORDER BY rowid DESC LIMIT ?",
             (merchant_id, max(1, min(limit, 200)))).fetchall()
+        notes = con.execute(
+            "SELECT * FROM notices WHERE merchant_id = ? ORDER BY id DESC LIMIT ?",
+            (merchant_id, max(1, min(limit, 200)))).fetchall()
     out = []
-    for r in reversed(rows):
+    for r in rows:
         try:
             ex = json.loads(r["extra"] or "{}")
         except ValueError:
             ex = {}
-        out.append({"ticket_id": r["ticket_id"], "message": r["message"], "reply": r["reply"],
-                    "created": r["created"], "translation": ex.get("translation"),
+        out.append({"kind": "case", "ticket_id": r["ticket_id"], "message": r["message"],
+                    "reply": r["reply"], "created": r["created"],
+                    "translation": ex.get("translation"),
                     "translation_missing": ex.get("translation_missing"),
-                    "reply_lang": ex.get("reply_lang")})
-    return out
+                    "reply_lang": ex.get("reply_lang"), "_order": (r["created"], 0, r["rowid"])})
+    for n in notes:
+        out.append({"kind": "notice", "ticket_id": n["ticket_id"], "message": None,
+                    "reply": n["reply"], "created": n["created"], "translation": None,
+                    "translation_missing": None, "reply_lang": n["reply_lang"],
+                    "id": n["id"], "_order": (n["created"], 1, n["id"])})
+    out.sort(key=lambda x: x.pop("_order"))
+    return out[-max(1, min(limit, 200)):]
 
 
 # ------------------------------------------------ voice: Sarvam speech to text

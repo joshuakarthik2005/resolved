@@ -50,6 +50,8 @@
                  border-bottom-right-radius:4px}
   .said.house{align-self:flex-start; background:#fff; border:1px solid var(--rule);
               border-bottom-left-radius:4px; font-family:var(--doc)}
+  /* a later update from the team, e.g. an escalated case approved on the case desk */
+  .said.notice{border-left:3px solid var(--authority)}
   .translate{align-self:flex-start; margin:-5px 0 0 4px; font-size:12px; color:var(--ink-soft);
              max-width:86%}
   .translate button{background:none; border:0; padding:2px 0; color:var(--authority);
@@ -236,6 +238,21 @@ async function loadShops(){
   await showShop();
 }
 
+/* Updates arrive after the fact (a person on the case desk approved, turned down or took a
+   case). Every 5 s, if the shop's conversation has grown and nothing is being sent, redraw
+   it. In production this is an outbound WhatsApp message instead. */
+let shown = {shop: null, count: 0};
+setInterval(async () => {
+  const shop = $('#merchant').value;
+  if(!shop || shown.shop !== shop || $('#send').disabled || take) return;
+  try{
+    const past = await getJSON('/api/merchant/' + encodeURIComponent(shop) + '/thread');
+    if(past.length > shown.count && $('#merchant').value === shop && !$('#send').disabled){
+      await showShop(); loadToday();
+    }
+  }catch(e){}
+}, 5000);
+
 /* Draw this shop's conversation from what the server recorded. */
 async function showShop(){
   const opt = $('#merchant').selectedOptions[0];
@@ -251,12 +268,14 @@ async function showShop(){
   }else{
     say('aside', 'Earlier with this shop');
     past.forEach(p => {
+      if(p.kind === 'notice'){ say('house notice', p.reply); return; }   // a later update
       say('merchant', p.message);
       sayReply({reply: p.reply, translation: p.translation,
                 translation_missing: p.translation_missing,
                 reply_lang_name: (p.translation && LANG_NAMES[p.reply_lang]) || ''});
     });
   }
+  shown = {shop, count: past.length};
   $('#thread').scrollTop = $('#thread').scrollHeight;
 }
 
@@ -493,6 +512,7 @@ $('#form').onsubmit = async e => {
       }else{
         renderDocket(d, said);
         sayReply(d);
+        if(shown.shop === $('#merchant').value) shown.count += 1;   // our own message, already drawn
         loadToday();
       }
     }catch(err){

@@ -280,7 +280,7 @@ than hiding it.
 Pages: `/` merchant chat · `/console` human console · `/judge` judge mode
 
 Before every rehearsal and before the jury: `python seed.py` (resets data) and
-`python tests.py` (76 tests, ~120 s).
+`python tests.py` (78 tests, ~125 s).
 
 **Stale data guard.** The ledger is seeded relative to the day `seed.py` ran, and the demo
 lines say "yesterday" and "5 days ago". On any other day step 1 misses. So: the seed date
@@ -433,6 +433,7 @@ regression test in `tests.py` named after its letter. Do not reintroduce any of 
 | — | **An answer alone was too little for the model**: given only "640", it proposed nothing and the gate refused a genuine duplicate refund on check 3. | Real Groq, second turn `640` | The model reads question + answer together | `the_model_reads_the_question_*` |
 | — | **The chat vanished when you left the page.** The thread lived only in the page; going to the case desk and back, a reload or switching shops started it from scratch. | Chat, open /console, come back | The thread is rebuilt from the recorded cases (`GET /api/merchant/{id}/thread`), translation links included; the browser only remembers which shop was open | `chat_thread_*` |
 | — | **Demo step 5 broke after midnight.** The ₹18,400 payment was seeded "200 minutes ago" and the line says "today"; between 00:00 and 03:20 that is yesterday, so the escalation became "not found". Five tests failed the moment the clock passed midnight. | Seed at 00:05, send the ₹18,400 chip | Seeded on the same calendar day whenever seed.py runs (200 min ago, or halfway between midnight and now); the window test reads the payment's real age instead of assuming 200 min | `demo_script_*`, `window_knob_*` |
+| — | **The shop never heard back when a person decided its case.** Approving the ₹18,400 escalation on the case desk changed nothing in the merchant chat. | Escalate ₹18,400, approve on /console, look at the chat | `_tell_shop()` writes a fixed-template update in the shop's language into a `notices` table on approve / turn down / take; the chat thread includes it and checks for new ones every 5 s. In production: an outbound WhatsApp message (a template message if outside the 24-hour window) | `shop_is_told_*` ×2 |
 | — | "Amount in dispute" showed "—" when no payment matched, hiding the amount the shop claimed. | Same message as above | Shows ₹1,250 "as the shop said it; no payment found" | `romanised_hindi_*` |
 | — | Concurrent identical complaints had no test (they already paid once). | 8 parallel copies of Kumar's line | Now tested: 1 RESOLVED, 7 ALREADY_DONE, 1 money movement | `E_concurrent_` |
 
