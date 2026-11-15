@@ -207,6 +207,23 @@ gate refused a genuine refund). The new case shows "carries on from T…"; the q
 Unchanged and separate: a UTR sent after "two payments match — send me the UTR" carries that
 case forward (demo step 3); that is matched by the payment, not by memory.
 
+## Voice: Sarvam speech to text (15 Nov)
+
+The mic records a 16 kHz WAV in the browser and posts it to our `/api/stt`, which forwards it
+to Sarvam (`saaras:v3`, no language given: Sarvam detects it) with `SARVAM_API_KEY` from the
+environment or the user's saved settings; the key never reaches the browser or a file.
+The text goes into the message box and is **never sent automatically**.
+- Endpoint is `https://api.sarvam.ai/speech-to-text` — **no `/v1`**; `/v1/...` returns 404.
+- One-line switch: `USE_SARVAM_STT` in `server.py` (or env `USE_SARVAM_STT=0`) brings back
+  the browser's Web Speech recogniser exactly as before (it auto-sends, as it always did).
+- Fallback is silent: while recording, the browser's recogniser listens in parallel; if
+  Sarvam fails or takes over 5 s (server gives up at 4.5 s), its words are used. No error
+  text anywhere. No voice at all on this browser: the mic is hidden.
+- Measured live: Tamil and Hindi clips transcribed word-for-word, ~550 ms each, language
+  detected (ta-IN 0.98). The browser path was exercised in Chrome by feeding a clip in as the
+  microphone. The parallel browser-recogniser backup could not be exercised that way (it
+  listens to the real microphone) — check it by speaking once on the venue laptop.
+
 ## Run it
 
 ```
@@ -229,7 +246,7 @@ than hiding it.
 Pages: `/` merchant chat · `/console` human console · `/judge` judge mode
 
 Before every rehearsal and before the jury: `python seed.py` (resets data) and
-`python tests.py` (67 tests, ~90 s).
+`python tests.py` (70 tests, ~100 s).
 
 **Stale data guard.** The ledger is seeded relative to the day `seed.py` ran, and the demo
 lines say "yesterday" and "5 days ago". On any other day step 1 misses. So: the seed date

@@ -482,15 +482,21 @@ const SPEECH = {en:'en-IN', hi:'hi-IN', mr:'mr-IN', bn:'bn-IN', as:'as-IN', pa:'
                 ur:'ur-IN'};
 const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
-if(!Rec){
-  $('#mic').classList.add('off');
-  $('#mic').title = 'Speech needs Chrome or Edge. Typing works everywhere.';
-  $('#mic').onclick = () => say('aside', 'Speech needs Chrome or Edge. Type it instead.');
-}else{
+const shopSpeech = () => SPEECH[$('#merchant').selectedOptions[0].dataset.lang] || 'en-IN';
+
+/* The browser's own speech recognition, exactly as before Sarvam: used when the voice
+   service is switched off (USE_SARVAM_STT in server.py) or not configured. */
+function browserVoice(){
+  if(!Rec){
+    $('#mic').classList.add('off');
+    $('#mic').title = 'Speech needs Chrome or Edge. Typing works everywhere.';
+    $('#mic').onclick = () => say('aside', 'Speech needs Chrome or Edge. Type it instead.');
+    return;
+  }
   $('#mic').onclick = () => {
     if(listening){ rec.stop(); return; }
     rec = new Rec();
-    rec.lang = SPEECH[$('#merchant').selectedOptions[0].dataset.lang] || 'en-IN';
+    rec.lang = shopSpeech();
     rec.interimResults = true; rec.continuous = false;
     rec.onstart = () => { listening = true; $('#mic').classList.add('live');
                           say('aside', 'Listening — speak the complaint'); };
@@ -502,6 +508,100 @@ if(!Rec){
     rec.start();
   };
 }
+
+/* Sarvam speech to text. Records a 16 kHz WAV, sends it to our server (which holds the key)
+   and puts the words in the box — never sent automatically. While recording, the browser's
+   own recogniser listens too, so if Sarvam is slow (5 s) or fails, its words are used
+   instead, silently. Language is detected by Sarvam, not set by us. */
+function encodeWav(chunks, rate){
+  const n = chunks.reduce((s, c) => s + c.length, 0);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((ch, i) => v.setUint8(o + i, ch.charCodeAt(0)));
+  str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for(const c of chunks) for(let i = 0; i < c.length; i++, o += 2){
+    const s = Math.max(-1, Math.min(1, c[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([buf], {type: 'audio/wav'});
+}
+
+let take = null;          // the recording in progress
+async function startTake(){
+  const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+  let ctx;
+  try{ ctx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 16000}); }
+  catch(e){ ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+  node.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(node); node.connect(ctx.destination);
+  const t = {stream, ctx, src, node, chunks, backup: '', sr: null,
+             limit: setTimeout(() => stopTake(), 25000)};
+  if(Rec){
+    try{
+      t.sr = new Rec(); t.sr.lang = shopSpeech(); t.sr.interimResults = true; t.sr.continuous = true;
+      t.sr.onresult = e => { t.backup = Array.from(e.results).map(r => r[0].transcript).join(''); };
+      t.sr.onerror = () => {};
+      t.sr.start();
+    }catch(e){ t.sr = null; }
+  }
+  take = t;
+  $('#mic').classList.add('live');
+  say('aside', 'Listening — tap the mic again when you have finished');
+}
+
+async function stopTake(){
+  const t = take; if(!t) return;
+  take = null;
+  clearTimeout(t.limit);
+  $('#mic').classList.remove('live');
+  try{ t.node.disconnect(); t.src.disconnect(); }catch(e){}
+  t.stream.getTracks().forEach(tr => tr.stop());
+  const rate = t.ctx.sampleRate;
+  t.ctx.close().catch(() => {});
+  if(t.sr){ try{ t.sr.stop(); }catch(e){} }
+  let words = '';
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 5000);
+  try{
+    const r = await fetch('/api/stt', {method: 'POST', body: encodeWav(t.chunks, rate),
+      headers: {'Content-Type': 'audio/wav'}, signal: ctrl.signal});
+    if(r.ok) words = ((await r.json()).text || '').trim();
+  }catch(e){ /* slow or offline: use the browser's own transcript */ }
+  clearTimeout(timer);
+  if(!words) words = (t.backup || '').trim();
+  if(words){ $('#input').value = words; $('#input').focus(); }
+}
+
+function sarvamVoice(){
+  const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia &&
+                       (window.AudioContext || window.webkitAudioContext));
+  if(!canRecord && !Rec){ $('#mic').hidden = true; return; }
+  if(!canRecord){ browserListen(); return; }
+  $('#mic').onclick = async () => {
+    if(take){ stopTake(); return; }
+    try{ await startTake(); }
+    catch(e){ if(Rec) browserListenOnce(); }       // no microphone access: browser only
+  };
+}
+
+/* Fallback when recording is impossible: the browser's recogniser fills the box. No auto-send. */
+function browserListenOnce(){
+  if(listening){ rec.stop(); return; }
+  rec = new Rec(); rec.lang = shopSpeech(); rec.interimResults = true; rec.continuous = false;
+  rec.onstart = () => { listening = true; $('#mic').classList.add('live'); };
+  rec.onresult = e => $('#input').value = Array.from(e.results).map(r => r[0].transcript).join('');
+  rec.onerror = () => {};
+  rec.onend = () => { listening = false; $('#mic').classList.remove('live'); };
+  rec.start();
+}
+function browserListen(){ $('#mic').onclick = browserListenOnce; }
+
+fetch('/api/voice').then(r => r.json()).then(v => v.sarvam ? sarvamVoice() : browserVoice())
+  .catch(() => browserVoice());
 
 loadShops().catch(() => problem('Not connected to the server. Start it with python server.py.'));
 loadOpeners(); tick(); setInterval(tick, 20000);

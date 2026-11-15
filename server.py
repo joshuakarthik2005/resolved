@@ -1448,6 +1448,73 @@ def merchant_thread(merchant_id: str, limit: int = 40):
     return out
 
 
+# ------------------------------------------------ voice: Sarvam speech to text
+# One line to switch voice back to the browser's own speech recognition:
+USE_SARVAM_STT = os.getenv("USE_SARVAM_STT", "1") != "0"
+# Note: no "/v1" — https://api.sarvam.ai/v1/speech-to-text returns 404 (checked 15 Nov)
+SARVAM_STT_URL = os.getenv("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text")
+SARVAM_STT_MODEL = "saaras:v3"
+STT_TIMEOUT_S = 4.5          # the page gives up at 5 s and uses the browser's own transcript
+STT_MAX_BYTES = 1_500_000    # ~45 s of 16 kHz mono WAV; Sarvam's REST limit is 30 s of audio
+
+
+def sarvam_key() -> str | None:
+    # Only from the environment (process, then the user's saved settings), never from a file.
+    key = os.environ.get("SARVAM_API_KEY")         # set but empty = deliberately no key
+    if key is None and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+                key = winreg.QueryValueEx(k, "SARVAM_API_KEY")[0]
+        except OSError:
+            key = None
+    return key.strip().strip("%").strip() if key else None
+
+
+@app.get("/api/voice")
+def voice_config():
+    """Tells the page which voice input to use. Never reveals the key."""
+    return {"sarvam": USE_SARVAM_STT and bool(sarvam_key())}
+
+
+@app.post("/api/stt")
+async def speech_to_text(request: Request):
+    """Forward a recorded WAV to Sarvam and return its transcript. Any failure is a quiet 503:
+    the page then uses the browser's own transcript, and shows no error."""
+    import urllib.request
+    key = sarvam_key()
+    if not (USE_SARVAM_STT and key):
+        raise HTTPException(503, "voice service off")
+    audio = await request.body()
+    if not audio or len(audio) > STT_MAX_BYTES:
+        raise HTTPException(413 if audio else 400, "audio missing or too long")
+    boundary = "----resolved" + os.urandom(8).hex()
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n{SARVAM_STT_MODEL}\r\n',
+        f'--{boundary}\r\nContent-Disposition: form-data; name="mode"\r\n\r\ntranscribe\r\n',
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="voice.wav"\r\n'
+        f'Content-Type: audio/wav\r\n\r\n',
+    ]
+    body = "".join(parts).encode() + audio + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(SARVAM_STT_URL, data=body, method="POST", headers={
+        "api-subscription-key": key, "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "User-Agent": "resolved-voice/1.0"})
+
+    def call():
+        with urllib.request.urlopen(req, timeout=STT_TIMEOUT_S) as r:
+            return json.load(r)
+    import asyncio
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(call), timeout=STT_TIMEOUT_S + 0.3)
+        text = str(data.get("transcript") or "").strip()
+    except Exception as exc:
+        print(f"[voice] Sarvam unavailable, page falls back: {type(exc).__name__}")
+        raise HTTPException(503, "voice service unavailable")
+    if not text:
+        raise HTTPException(503, "no speech recognised")
+    return {"text": text[:1000], "language": data.get("language_code")}
+
+
 @app.get("/api/languages")
 def languages():
     return [{"code": k, "name": v} for k, v in langs.NAMES.items()]

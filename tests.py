@@ -31,6 +31,8 @@ os.environ["RESOLVED_DB"] = TEST_DB
 os.environ["RESOLVED_POLICY"] = TEST_POLICY
 for k in ("GROQ_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
     os.environ.pop(k, None)              # the stand-in planner: deterministic, offline
+os.environ["SARVAM_API_KEY"] = ""        # empty = no key: never call real Sarvam from tests
+os.environ.pop("USE_SARVAM_STT", None)
 sys.path.insert(0, HERE)
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -47,7 +49,8 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def start_server(sabotage: bool = False, extra: str = "") -> tuple[subprocess.Popen, str]:
+def start_server(sabotage: bool = False, extra: str = "",
+                 env: dict | None = None) -> tuple[subprocess.Popen, str]:
     port = free_port()
     boot = (f"import sys; sys.path.insert(0, {HERE!r}); import gate\n"
             + ("_g = gate.gate\n"
@@ -57,7 +60,7 @@ def start_server(sabotage: bool = False, extra: str = "") -> tuple[subprocess.Po
             + extra
             + f"import server, uvicorn; uvicorn.run(server.app, host='127.0.0.1', port={port},"
               " log_level='error')")
-    p = subprocess.Popen([sys.executable, "-c", boot], cwd=HERE,
+    p = subprocess.Popen([sys.executable, "-c", boot], cwd=HERE, env=dict(os.environ, **(env or {})),
                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     PROCS.append(p)
     url = f"http://127.0.0.1:{port}"
@@ -1286,6 +1289,108 @@ def reply_language_can_be_any_of_13_and_is_audited():
     assert d["reply_lang"] == "en" and d["reply"].startswith("A UPI reference"), d
     src = open(os.path.join(HERE, "static", "chat.html"), encoding="utf-8").read()
     assert 'id="lang"' in src and "partial" not in src.lower()
+
+
+# ------------------------------------------------ voice: Sarvam speech to text
+def fake_sarvam():
+    """A stand-in for Sarvam's STT endpoint on a spare port. Records what it was sent."""
+    import http.server
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            seen.append({"path": self.path, "key": self.headers.get("api-subscription-key"),
+                         "body": body})
+            if self.path == "/slow":
+                time.sleep(7)
+            if self.path == "/bad":
+                self.send_response(500); self.end_headers(); return
+            out = json.dumps({"request_id": "x", "transcript": "எனக்கு பணம் வரவில்லை",
+                              "language_code": "ta-IN"}).encode()
+            try:
+                self.send_response(200); self.send_header("Content-Type", "application/json")
+                self.end_headers(); self.wfile.write(out)
+            except OSError:
+                pass                     # the slow case: our server already gave up, as it should
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}", seen
+
+
+def tiny_wav() -> bytes:
+    import struct
+    pcm = b"\x00\x00" * 1600
+    return (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " +
+            struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16) + b"data" +
+            struct.pack("<I", len(pcm)) + pcm)
+
+
+def post_audio(url, data):
+    req = urllib.request.Request(url + "/api/stt", data=data, method="POST",
+                                 headers={"Content-Type": "audio/wav"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace")
+
+
+@test
+def voice_goes_to_sarvam_with_the_key_and_auto_language():
+    srv, fake, seen = fake_sarvam()
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "SARVAM_STT_URL": fake + "/ok"})
+    try:
+        assert call("GET", "/api/voice", base=url)[1] == {"sarvam": True}
+        code, r = post_audio(url, tiny_wav())
+        assert code == 200 and r["text"] == "எனக்கு பணம் வரவில்லை" and r["language"] == "ta-IN", r
+        sent = seen[-1]
+        assert sent["key"] == "test-key"
+        assert b'name="model"\r\n\r\nsaaras:v3' in sent["body"]
+        assert b"language_code" not in sent["body"]          # Sarvam detects the language
+        assert b"RIFF" in sent["body"]                       # the audio went through intact
+    finally:
+        stop(p); srv.shutdown()
+
+
+@test
+def voice_failures_are_quiet_and_quick():
+    srv, fake, _ = fake_sarvam()
+    for path in ("/slow", "/bad"):
+        p, url = start_server(env={"SARVAM_API_KEY": "test-key", "SARVAM_STT_URL": fake + path})
+        try:
+            t0 = time.perf_counter()
+            code, _ = post_audio(url, tiny_wav())
+            took = time.perf_counter() - t0
+            assert code == 503, (path, code)
+            assert took < 5.5, (path, took)                  # the page waits 5 s at most
+        finally:
+            stop(p)
+    srv.shutdown()
+    # no key at all: the page is told to use the browser's own recogniser
+    assert call("GET", "/api/voice")[1] == {"sarvam": False}
+    assert post_audio(BASE, tiny_wav())[0] == 503
+
+
+@test
+def voice_flag_off_restores_the_browser_recogniser():
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "USE_SARVAM_STT": "0"})
+    try:
+        assert call("GET", "/api/voice", base=url)[1] == {"sarvam": False}
+        assert post_audio(url, tiny_wav())[0] == 503
+    finally:
+        stop(p)
+    src = open(os.path.join(HERE, "static", "chat.html"), encoding="utf-8").read()
+    assert "v.sarvam ? sarvamVoice() : browserVoice()" in src
+    stop_take = src.split("async function stopTake()")[1].split("function sarvamVoice")[0]
+    assert "requestSubmit" not in stop_take                  # Sarvam words are never auto-sent
+    assert "ctrl.abort(), 5000" in stop_take                 # 5 s, then the browser's words
+    assert "$('#mic').hidden = true" in src                  # no voice at all: no mic
+    server_src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
+    assert 'USE_SARVAM_STT = os.getenv("USE_SARVAM_STT", "1") != "0"' in server_src
 
 
 @test
