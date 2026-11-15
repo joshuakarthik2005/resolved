@@ -789,6 +789,27 @@ REPLIES = {
         "ta": "வழக்கு {case} பற்றிய தகவல்: எங்கள் குழுவில் ஒருவர் இதைக் கையாள்கிறார், வங்கியுடன் தீர்த்து வைப்பார். நீங்கள் எதுவும் செய்ய வேண்டியதில்லை.",
         "hi": "केस {case} पर अपडेट: हमारी टीम का एक व्यक्ति इसे देख रहा है और बैंक के साथ सुलझाएगा। आपको कुछ करने की ज़रूरत नहीं।",
     },
+    # the record says done, the shop says not received: a person checks with the bank
+    "SETTLEMENT_CHECK": {
+        "en": "The bank confirmed this ₹{amt} payment, but you say it has not reached your account. That is a settlement question, so I have passed it to our team to check with the bank. You will hear back here. Reference: {utr}",
+        "ta": "இந்த ₹{amt} பணத்தை வங்கி உறுதி செய்துள்ளது, ஆனால் உங்கள் கணக்கில் வரவில்லை என்கிறீர்கள். இது செட்டில்மென்ட் விஷயம்; வங்கியுடன் சரிபார்க்க எங்கள் குழுவிடம் அனுப்பியுள்ளேன். இங்கே பதில் வரும். குறிப்பு: {utr}",
+        "hi": "बैंक ने इस ₹{amt} भुगतान की पुष्टि की है, पर आप कह रहे हैं कि यह आपके खाते में नहीं आया। यह सेटलमेंट का मामला है, इसलिए बैंक से जाँच के लिए हमारी टीम को भेज दिया है। जवाब यहीं मिलेगा। संदर्भ: {utr}",
+    },
+    "SETTLED_CHECK": {
+        "en": "We credited this ₹{amt} to you in the settlement of {date}, and you say it still has not arrived. I have passed it to our team to check that settlement with the bank. You will hear back here. Reference: {utr}",
+        "ta": "இந்த ₹{amt} {date} செட்டில்மென்டில் உங்களுக்கு வரவு வைக்கப்பட்டது, இன்னும் வரவில்லை என்கிறீர்கள். அந்த செட்டில்மென்டை வங்கியுடன் சரிபார்க்க எங்கள் குழுவிடம் அனுப்பியுள்ளேன். குறிப்பு: {utr}",
+        "hi": "यह ₹{amt} {date} के सेटलमेंट में आपके खाते में जमा किया गया था, और आप कह रहे हैं कि अब भी नहीं आया। उस सेटलमेंट की बैंक से जाँच के लिए टीम को भेज दिया है। संदर्भ: {utr}",
+    },
+    "REFUND_CHECK": {
+        "en": "We returned this ₹{amt} to the customer on {date}. If they still have not received it, our team will check with the bank — I have passed it on. You will hear back here. Reference: {utr}",
+        "ta": "இந்த ₹{amt} {date} அன்று வாடிக்கையாளருக்குத் திருப்பி அனுப்பப்பட்டது. இன்னும் கிடைக்கவில்லை என்றால், எங்கள் குழு வங்கியுடன் சரிபார்க்கும் — அனுப்பியுள்ளேன். குறிப்பு: {utr}",
+        "hi": "यह ₹{amt} {date} को ग्राहक को लौटा दिया गया था। अगर उन्हें अब भी नहीं मिला, तो हमारी टीम बैंक से जाँच करेगी — मैंने आगे भेज दिया है। संदर्भ: {utr}",
+    },
+    "ALREADY_WITH_TEAM": {
+        "en": "Case {case} about this ₹{amt} payment is already with our team. You will hear back here when they decide. Reference: {utr}",
+        "ta": "இந்த ₹{amt} பணம் பற்றிய வழக்கு {case} ஏற்கனவே எங்கள் குழுவிடம் உள்ளது. அவர்கள் முடிவு செய்ததும் இங்கே பதில் வரும். குறிப்பு: {utr}",
+        "hi": "इस ₹{amt} भुगतान का केस {case} पहले से हमारी टीम के पास है। फ़ैसला होते ही जवाब यहीं मिलेगा। संदर्भ: {utr}",
+    },
     "ASK_AMOUNT": {
         "en": "I can look into that. How much was the payment, and roughly when? The UTR from the customer's app is even better.",
         "ta": "பார்க்கிறேன். பணம் எவ்வளவு, எப்போது? வாடிக்கையாளரின் ஆப்பிலுள்ள UTR இருந்தால் இன்னும் நல்லது.",
@@ -887,6 +908,7 @@ def reply_text(key: str, lang: str, amt=None, utr=None, **kw) -> str:
     return tpl.format(amt=f"{amt:,}" if amt else "—", utr=utr or "—", cycle=cyc_txt,
                       when=kw.pop("when", WHEN.get(lang, WHEN["en"])), **{
                           "txn_amt": "—", "seen": "", "bad": "", "n": "", "note": "", "case": "",
+                          "date": "",
                           "time": ""} | kw)
 
 
@@ -1149,20 +1171,36 @@ def handle_ticket(body: TicketIn):
                                   or (txn_row["bank_status"] == "SUCCESS"
                                       and not txn_row.get("duplicate_of")))
             nothing_asked = plan["action"] == "NONE" and not facts["requested_destination"]
-            if closed and "1" not in failed_ids and (decision.outcome != "BLOCK" or nothing_asked):
-                # Nothing left to do. Say so; never pay twice.
+            open_case = con.execute(
+                "SELECT ticket_id FROM tickets WHERE utr = ? AND merchant_id = ?"
+                " AND status IN ('ESCALATED','TAKEN') ORDER BY rowid DESC LIMIT 1",
+                (utr, merchant["merchant_id"])).fetchone() if txn_row else None
+            if open_case and decision.outcome != "BLOCK":
+                # Already in front of a person: do not open a second copy of the same case.
                 _RULINGS.pop(id(decision), None)
-                if txn_row["settled"]:
-                    key, note = "ALREADY_SETTLED", txn_row["note"]
-                elif txn_row["reversed"]:
-                    key, note = "ALREADY_REVERSED", txn_row["note"]
-                else:
-                    key, note = "ALREADY_NORMAL", ""
-                reply = say(key, amt, utr, note=note,
-                                   time=datetime.fromisoformat(txn_row["txn_time"]).strftime(
-                                       "%H:%M on %d %b"))
+                reply = say("ALREADY_WITH_TEAM", amt, utr, case=open_case["ticket_id"])
                 status, outcome = "ALREADY_DONE", "NONE"
-                log(con, ticket_id, "agent", "NOTHING_TO_DO", f"{utr}: {key.lower()}")
+                log(con, ticket_id, "agent", "ALREADY_WITH_TEAM",
+                    f"{utr}: case {open_case['ticket_id']} is already with a person")
+            elif closed and "1" not in failed_ids and (decision.outcome != "BLOCK" or nothing_asked):
+                # The record says this payment is done. Either there is truly nothing to do,
+                # or the shop is telling us the money still has not arrived — which a record
+                # alone cannot disprove. Then a person checks; nothing is paid twice.
+                _RULINGS.pop(id(decision), None)
+                check, key, when = closed_case_check(con, txn_row, now)
+                if check:
+                    reply = say(key, amt, utr, date=when)
+                    status, outcome = "ESCALATED", "ESCALATE"
+                    extra["check"] = check
+                    log(con, ticket_id, "agent", "SENT_TO_PERSON",
+                        f"{utr}: {check.replace('_', ' ')} — the record says done, the shop "
+                        "says not received")
+                else:
+                    when_paid = datetime.fromisoformat(txn_row["txn_time"])
+                    reply = say(key, amt, utr, note=txn_row["note"],
+                                time=f"{when_paid:%H:%M}, {when_paid.day}/{when_paid.month}")
+                    status, outcome = "ALREADY_DONE", "NONE"
+                    log(con, ticket_id, "agent", "NOTHING_TO_DO", f"{utr}: {key.lower()}")
             elif decision.outcome == "APPROVE" and txn_row and facts["override"]:
                 # Not a gate change: the gate passed it. A message that tries to change the
                 # rules never gets an AUTOMATIC action, however clean its facts look.
@@ -1274,6 +1312,49 @@ def _languages(say: Reply, lang: str, msg_lang: str, how: str) -> dict:
     return out
 
 
+REFUND_DAYS = 1      # we promise "within 24 hours" for a refund to reach the customer
+
+
+def closed_case_check(con, txn_row: dict, now: datetime) -> tuple[str | None, str, str]:
+    """A payment the record calls done, complained about again. Returns (check, reply key,
+    date shown). check is None when there is truly nothing to do yet.
+    - succeeded normally at the bank: the bank's SUCCESS does not prove the shop was paid
+      (a settlement can fail, be held, or go to a closed account) -> a person checks
+    - we credited it, and its settlement day has passed -> a person checks that settlement
+    - we returned it to the customer over 24 h ago -> a person checks the refund
+    Before those points the original answer stands ("already credited/returned")."""
+    if txn_row["settled"]:
+        m = re.search(r"cycle (\d{4}-\d{2}-\d{2})", txn_row.get("note") or "")
+        if m and now.date().isoformat() > m.group(1):
+            day = datetime.fromisoformat(m.group(1))
+            return "settled_check", "SETTLED_CHECK", f"{day.day}/{day.month}"
+        return None, "ALREADY_SETTLED", ""
+    if txn_row["reversed"]:
+        r = con.execute("SELECT ts FROM audit WHERE event IN ('REVERSAL','DUPLICATE_REFUND')"
+                        " AND detail LIKE ? ORDER BY id DESC LIMIT 1",
+                        (txn_row["utr"] + " %",)).fetchone()
+        if r and now - datetime.fromisoformat(r["ts"]) > timedelta(days=REFUND_DAYS):
+            back = datetime.fromisoformat(r["ts"])
+            return "refund_check", "REFUND_CHECK", f"{back.day}/{back.month}"
+        return None, "ALREADY_REVERSED", ""
+    return "settlement_check", "SETTLEMENT_CHECK", ""
+
+
+CHECK_READING = {
+    "settlement_check": "Looks real. The bank confirmed this payment, but the shop says it never "
+                        "reached their account. That is a settlement question, not a payment one: "
+                        "check the settlement with the bank. Approving here would credit the shop "
+                        "a second time if the original settlement then lands, so there is no "
+                        "approve button.",
+    "settled_check": "Looks real. We credited this payment and its settlement day has passed, but "
+                     "the shop says it still has not arrived. Check that settlement with the bank "
+                     "before anything else moves; paying again could pay the shop twice.",
+    "refund_check": "Looks real. We returned this payment to the customer over a day ago, and the "
+                    "shop says the customer still has not received it. Check the reversal with "
+                    "the bank; returning it again could refund the customer twice.",
+}
+
+
 def _tell_shop(con, t, key: str, txn_row: dict | None = None) -> None:
     """A later message to the shop: what a person decided on its escalated case. A fixed
     template in the shop's language, filled from the record. In production this goes out
@@ -1338,16 +1419,20 @@ def queue():
             t["npci_meaning"] = NPCI.get(t.get("npci_code") or "", ("", ""))[1]
             fails = {f[0] for f in (t["checks_failed"] or "").split(" | ") if f}
             # no failed checks at all = held only because the message tried to override
-            t["human_may_approve"] = t["status"] == "ESCALATED" and fails <= HUMAN_MAY_OVERRIDE
-            t["human_may_take"] = t["status"] == "ESCALATED" and "4" in fails
-            t["check4"] = check4_reading(t) if "4" in fails else None
-            t["failed_marked"] = failed_with_reasons(t)
-            t["ending"] = ending(t) if t["outcome"] in ("APPROVE", "ESCALATE", "BLOCK") else None
             try:
                 ex = json.loads(t.get("extra") or "{}")
             except ValueError:
                 ex = {}
+            check = ex.get("check")
+            t["human_may_approve"] = (t["status"] == "ESCALATED" and fails <= HUMAN_MAY_OVERRIDE
+                                      and not check)
+            t["human_may_take"] = t["status"] == "ESCALATED" and ("4" in fails or bool(check))
+            t["check4"] = ({"kind": "real", "text": CHECK_READING[check]} if check in CHECK_READING
+                           else check4_reading(t) if "4" in fails else None)
+            t["failed_marked"] = failed_with_reasons(t)
+            t["ending"] = ending(t) if t["outcome"] in ("APPROVE", "ESCALATE", "BLOCK") else None
             t["taken"], t["override"] = ex.get("taken"), ex.get("override")
+            t["check"] = check
             out.append(t)
         # the case closest to its RBI deadline comes first
         out.sort(key=lambda t: (t["rbi"] is None, t["rbi"]["hours_left"] if t["rbi"] else 0))
@@ -1417,9 +1502,16 @@ def decide(ticket_id: str, body: DecisionIn):
                 _tell_shop(con, t, "HUMAN_REJECTED")
                 con.execute("COMMIT")
                 return {"ok": True, "ticket_id": ticket_id, "decision": "reject"}
+            try:
+                check = json.loads(t["extra"] or "{}").get("check")
+            except ValueError:
+                check = None
+            if body.decision == "approve" and check:
+                raise HTTPException(409, "this case needs the settlement or refund checked with "
+                                         "the bank first; take it instead")
             if body.decision == "take":
                 fails = {f[0] for f in (t["checks_failed"] or "").split(" | ") if f}
-                if "4" not in fails:
+                if "4" not in fails and not check:
                     raise HTTPException(409, f"case {ticket_id} was not held on check 4; "
                                              "approve it or turn it down")
                 try:
@@ -1911,19 +2003,22 @@ def metrics():
 
 
 # ------------------------------------------------------------------- pages
+# Always fetch the page fresh: a browser holding an old copy after a restart showed
+# yesterday's wording on stage-day testing (15 Nov).
+NO_CACHE = {"Cache-Control": "no-cache"}
 @app.get("/")
 def chat_page():
-    return FileResponse(os.path.join(STATIC, "chat.html"))
+    return FileResponse(os.path.join(STATIC, "chat.html"), headers=NO_CACHE)
 
 
 @app.get("/judge")
 def judge_page():
-    return FileResponse(os.path.join(STATIC, "judge.html"))
+    return FileResponse(os.path.join(STATIC, "judge.html"), headers=NO_CACHE)
 
 
 @app.get("/console")
 def console_page():
-    return FileResponse(os.path.join(STATIC, "console.html"))
+    return FileResponse(os.path.join(STATIC, "console.html"), headers=NO_CACHE)
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

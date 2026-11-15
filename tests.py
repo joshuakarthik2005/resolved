@@ -361,10 +361,23 @@ def E_replay_reverses_once():
 
 @test
 def E_normal_success_is_not_paid_again():
+    """The bank says it succeeded; the shop says it never arrived. Never paid again
+    automatically — a person checks the settlement (take or turn down, no approve)."""
     row = q("SELECT * FROM ledger WHERE bank_status='SUCCESS' AND merchant_id='M005'"
             " AND amount != 640")[0]
     d = ticket("M005", f"{row['utr']} paid {row['amount']} missing")
-    assert d["status"] == "ALREADY_DONE" and money_moves() == 0, d
+    assert d["status"] == "ESCALATED" and money_moves() == 0, d
+    # the gate DID rule (check 4 fails); the routing is decided after it, not instead
+    assert d["gate"] == "ESCALATE" and [f[0] for f in d["failed"]] == ["4"], d
+    assert DEVANAGARI.search(d["reply"]) and "UTR" in d["reply"]          # Delhi Dhaba, Hindi
+    t = next(x for x in call("GET", "/api/queue")[1] if x["ticket_id"] == d["ticket_id"])
+    assert t["check"] == "settlement_check" and t["human_may_take"] and not t["human_may_approve"]
+    assert "settlement question" in t["check4"]["text"]
+    assert call("POST", f"/api/queue/{d['ticket_id']}/decide", {"decision": "approve"})[0] == 409
+    assert call("POST", f"/api/queue/{d['ticket_id']}/decide", {"decision": "take"})[0] == 200
+    assert money_moves() == 0
+    note = call("GET", "/api/merchant/M005/thread")[1][-1]
+    assert note["kind"] == "notice" and d["ticket_id"] in note["reply"]
 
 
 @test
@@ -379,9 +392,56 @@ def E_model_proposing_nothing_on_a_paid_payment_is_not_a_risk_event():
         row = q("SELECT * FROM ledger WHERE bank_status='SUCCESS' AND merchant_id='M005'"
                 " AND amount != 640")[0]
         d = ticket("M005", f"{row['utr']} paid {row['amount']} missing", url)
-        assert d["status"] == "ALREADY_DONE", d
+        # not a refusal, not the risk log: a person checks the settlement
+        assert d["status"] == "ESCALATED" and d["outcome"] == "ESCALATE", d
+        assert money_moves() == 0
     finally:
         stop(p)
+
+
+@test
+def credited_then_settlement_day_passed_goes_to_a_person():
+    d = ticket("M001", KUMAR)
+    assert d["outcome"] == "APPROVE"
+    again = ticket("M001", KUMAR)                       # same day: settlement not due yet
+    assert again["status"] == "ALREADY_DONE", again
+    exec_sql("UPDATE ledger SET note = 'marked paid -> PAYOUT-001, cycle 2000-01-01'"
+             " WHERE utr = 'UTR300000000001'")           # its settlement day has passed
+    late = ticket("M001", KUMAR)
+    assert late["status"] == "ESCALATED", late
+    assert "1/1" in late["reply"] and TAMIL.search(late["reply"]), late["reply"]   # date, in Tamil
+    t = next(x for x in call("GET", "/api/queue")[1] if x["ticket_id"] == late["ticket_id"])
+    assert t["check"] == "settled_check" and not t["human_may_approve"] and t["human_may_take"]
+    assert call("POST", f"/api/queue/{late['ticket_id']}/decide", {"decision": "approve"})[0] == 409
+    assert money_moves() == 1                            # only the original credit
+
+
+@test
+def refunded_over_a_day_ago_goes_to_a_person():
+    ticket("M002", ANU)
+    assert ticket("M002", ANU)["status"] == "ALREADY_DONE"      # within 24 h: still on its way
+    exec_sql("UPDATE audit SET ts = datetime(ts, '-2 days') WHERE event = 'REVERSAL'")
+    late = ticket("M002", ANU)
+    assert late["status"] == "ESCALATED", late
+    t = next(x for x in call("GET", "/api/queue")[1] if x["ticket_id"] == late["ticket_id"])
+    assert t["check"] == "refund_check" and not t["human_may_approve"] and t["human_may_take"]
+    assert "reversal" in t["check4"]["text"]
+    assert call("POST", f"/api/queue/{late['ticket_id']}/decide", {"decision": "take"})[0] == 200
+    assert money_moves() == 1                            # only the original refund
+
+
+@test
+def a_case_already_with_a_person_is_not_opened_twice():
+    first = ticket("M004", BIG)
+    second = ticket("M004", BIG)
+    assert second["status"] == "ALREADY_DONE", second
+    assert first["ticket_id"] in second["reply"] and TAMIL.search(second["reply"]), second["reply"]
+    waiting = [x for x in call("GET", "/api/queue")[1] if x["status"] == "ESCALATED"]
+    assert len(waiting) == 1, waiting
+    # once a person has decided it, a new complaint is a new case again
+    call("POST", f"/api/queue/{first['ticket_id']}/decide", {"decision": "reject"})
+    third = ticket("M004", BIG)
+    assert third["status"] == "ESCALATED", third
 
 
 # ---------------------------------------------------------------- F. XSS

@@ -141,6 +141,10 @@ const COL = {acted:'#0B3C5D', person:'#8A6212', refused:'#8A2B20', asked:'#8C968
 const SAID = {acted:'acted on alone', person:'sent to a person', refused:'refused',
               asked:'asked the shop'};
 const KNOCK = ' (only because there was no payment to act on)';
+/* Cases where the record says the money already moved but the shop says it did not arrive. */
+const CHECK_REASON = {settlement_check: 'bank says paid, shop says not received',
+                      settled_check: 'we credited it, shop says still not arrived',
+                      refund_check: 'we refunded it, customer says not received'};
 let rows = [], open = null;
 
 /* RBI T+5: how long is left to put a failed, debited payment back. */
@@ -217,6 +221,7 @@ function caseRow([t,i]){
     : t.override && t.status === 'ESCALATED' && !t.checks_failed
     ? 'held: the message tried to change the rules'
     : t.status === 'TAKEN' && t.taken ? `taken by ${t.taken.by}`
+    : t.check && t.status === 'ESCALATED' ? (CHECK_REASON[t.check] || 'needs checking with the bank')
     : t.check4 && t.status === 'ESCALATED'
     ? (t.check4.kind === 'junk' ? 'check 4 — looks like junk' : 'check 4 — looks real, needs a person')
     : mainReason(t)
@@ -328,8 +333,9 @@ function show(t){
         <button class="danger" data-act="reject">Turn it down</button>
       </div>
       <p class="quiet-note" id="decideNote" style="margin-top:var(--s4)">There is no approve
-      button: the gate ruled that this action is not allowed here, and a person cannot lift
-      check 4. <b>Take this case</b> moves it off the agent and onto you, to settle through the
+      button: ${t.check ? 'the record says this money already moved, so paying again could pay'
+        + ' twice. Check it with the bank first.' : 'the gate ruled that this action is not'
+        + ' allowed here, and a person cannot lift check 4.'} <b>Take this case</b> moves it off the agent and onto you, to settle through the
       back office; nothing moves from this screen. <b>Turn it down</b> closes it. The reading
       above comes from what the agent proposed, so it is a guide, not a ruling. Read the
       message. Either way, your decision goes on the audit trail.</p>`
