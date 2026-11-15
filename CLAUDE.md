@@ -245,6 +245,19 @@ The text goes into the message box and is **never sent automatically**.
   microphone. The parallel browser-recogniser backup could not be exercised that way (it
   listens to the real microphone) — check it by speaking once on the venue laptop.
 
+## Voice: replies read aloud (Sarvam Bulbul, 15 Nov)
+
+After a reply's TEXT is on screen, the page asks `/api/tts` for it spoken (`bulbul:v3`, in the
+reply's language, 16 kHz WAV), plays it once and leaves "Listen again" under the reply. New
+replies only, not the redrawn history.
+- One-line switch: `USE_SARVAM_TTS` in `server.py` (or env `USE_SARVAM_TTS=0`).
+- Never holds up the text; any failure, a timeout (10 s) or a language Bulbul does not speak
+  (Urdu, Assamese) means text only, silently.
+- Measured: ~3-4 s per Tamil/Hindi/Telugu reply, once 21 s (that becomes text only). In
+  Chrome the text appeared at 1.9 s and the speech at 7.5 s. `bulbul:v2` is deprecated.
+- The spoken words are the same fixed template as the text, so "the model never writes the
+  reply" still holds.
+
 ## Run it
 
 ```
@@ -267,7 +280,7 @@ than hiding it.
 Pages: `/` merchant chat · `/console` human console · `/judge` judge mode
 
 Before every rehearsal and before the jury: `python seed.py` (resets data) and
-`python tests.py` (74 tests, ~110 s).
+`python tests.py` (76 tests, ~120 s).
 
 **Stale data guard.** The ledger is seeded relative to the day `seed.py` ran, and the demo
 lines say "yesterday" and "5 days ago". On any other day step 1 misses. So: the seed date

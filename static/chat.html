@@ -294,8 +294,36 @@ function say(cls, words){
 
 /* The reply is always in the shop's language. If the message was written in another
    language, offer the same reply in that one, underneath. Built with textContent only. */
+/* Replies read aloud (Sarvam Bulbul). The text is already on screen before this runs, so the
+   spoken version can only ever add to it: any failure leaves the text, and shows nothing. */
+let VOICE = {sarvam: false, speak: false, speak_langs: []};
+async function speakReply(d, bubble){
+  if(!VOICE.speak || !VOICE.speak_langs.includes(d.reply_lang) || !d.reply) return;
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 11000);
+  let url = null;
+  try{
+    const r = await fetch('/api/tts', {method: 'POST', signal: ctrl.signal,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: d.reply, language: d.reply_lang})});
+    if(r.ok) url = URL.createObjectURL(await r.blob());
+  }catch(e){ /* text only */ }
+  clearTimeout(timer);
+  if(!url) return;
+  const audio = new Audio(url);
+  const row = document.createElement('div');
+  row.className = 'translate listen';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Listen again';
+  btn.onclick = () => { audio.currentTime = 0; audio.play().catch(() => {}); };
+  row.append(btn);
+  bubble.after(row);
+  audio.play().catch(() => {});          // the shop just tapped Send, so this is usually allowed
+}
+
 function sayReply(d){
   const bubble = say('house', d.reply);
+  if(d.ticket_id) speakReply(d, bubble);   // new replies only, not the redrawn history
   const t = d.translation;
   if(!t && !d.translation_missing) return;
   const row = document.createElement('div');
@@ -600,7 +628,8 @@ function browserListenOnce(){
 }
 function browserListen(){ $('#mic').onclick = browserListenOnce; }
 
-fetch('/api/voice').then(r => r.json()).then(v => v.sarvam ? sarvamVoice() : browserVoice())
+fetch('/api/voice').then(r => r.json())
+  .then(v => { VOICE = v; return v.sarvam ? sarvamVoice() : browserVoice(); })
   .catch(() => browserVoice());
 
 loadShops().catch(() => problem('Not connected to the server. Start it with python server.py.'));

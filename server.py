@@ -1483,10 +1483,58 @@ def sarvam_key() -> str | None:
     return agent.sarvam_key()
 
 
+# ------------------------------------------------ voice: replies read aloud (Bulbul)
+# One line to switch spoken replies off (text replies are never affected):
+USE_SARVAM_TTS = os.getenv("USE_SARVAM_TTS", "1") != "0"
+SARVAM_TTS_URL = os.getenv("SARVAM_TTS_URL", "https://api.sarvam.ai/text-to-speech")
+SARVAM_TTS_MODEL = "bulbul:v3"
+TTS_TIMEOUT_S = 10    # Bulbul took ~4 s per reply, once 21 s (15 Nov); text is never held up
+# Languages Bulbul speaks, as BCP-47. Urdu and Assamese are not among them: text only.
+TTS_LANG = {"en": "en-IN", "hi": "hi-IN", "mr": "mr-IN", "bn": "bn-IN", "pa": "pa-IN",
+            "gu": "gu-IN", "or": "od-IN", "ta": "ta-IN", "te": "te-IN", "kn": "kn-IN",
+            "ml": "ml-IN"}
+
+
 @app.get("/api/voice")
 def voice_config():
-    """Tells the page which voice input to use. Never reveals the key."""
-    return {"sarvam": USE_SARVAM_STT and bool(sarvam_key())}
+    """Tells the page which voice features are on. Never reveals the key."""
+    key = bool(sarvam_key())
+    return {"sarvam": USE_SARVAM_STT and key, "speak": USE_SARVAM_TTS and key,
+            "speak_langs": sorted(TTS_LANG) if (USE_SARVAM_TTS and key) else []}
+
+
+class SpeakIn(BaseModel):
+    text: str = Field(max_length=1000)
+    language: str = Field(max_length=5)
+
+
+@app.post("/api/tts")
+async def text_to_speech(body: SpeakIn):
+    """The reply, spoken. Any failure is a quiet 503: the shop still has the text."""
+    import asyncio
+    import base64
+    import urllib.request
+    key, code = sarvam_key(), TTS_LANG.get(body.language)
+    if not (USE_SARVAM_TTS and key and code and body.text.strip()):
+        raise HTTPException(503, "spoken reply unavailable")
+    req = urllib.request.Request(SARVAM_TTS_URL, method="POST", data=json.dumps(
+        {"text": body.text.strip(), "target_language_code": code, "model": SARVAM_TTS_MODEL,
+         "speech_sample_rate": 16000}       # same speed, ~30% less to download on venue wifi
+    ).encode(), headers={"api-subscription-key": key, "Content-Type": "application/json",
+                         "User-Agent": "resolved-voice/1.0"})
+
+    def call():
+        with urllib.request.urlopen(req, timeout=TTS_TIMEOUT_S) as r:
+            return json.load(r)
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(call), timeout=TTS_TIMEOUT_S + 0.3)
+        audio = b"".join(base64.b64decode(a) for a in data.get("audios") or [])
+    except Exception as exc:
+        print(f"[voice] Bulbul unavailable, text only: {type(exc).__name__}")
+        raise HTTPException(503, "spoken reply unavailable")
+    if not audio:
+        raise HTTPException(503, "spoken reply unavailable")
+    return Response(audio, media_type="audio/wav")
 
 
 @app.post("/api/stt")

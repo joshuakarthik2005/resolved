@@ -1344,7 +1344,7 @@ def voice_goes_to_sarvam_with_the_key_and_auto_language():
     srv, fake, seen = fake_sarvam()
     p, url = start_server(env={"SARVAM_API_KEY": "test-key", "SARVAM_STT_URL": fake + "/ok"})
     try:
-        assert call("GET", "/api/voice", base=url)[1] == {"sarvam": True}
+        assert call("GET", "/api/voice", base=url)[1]["sarvam"] is True
         code, r = post_audio(url, tiny_wav())
         assert code == 200 and r["text"] == "எனக்கு பணம் வரவில்லை" and r["language"] == "ta-IN", r
         sent = seen[-1]
@@ -1371,7 +1371,7 @@ def voice_failures_are_quiet_and_quick():
             stop(p)
     srv.shutdown()
     # no key at all: the page is told to use the browser's own recogniser
-    assert call("GET", "/api/voice")[1] == {"sarvam": False}
+    assert call("GET", "/api/voice")[1]["sarvam"] is False
     assert post_audio(BASE, tiny_wav())[0] == 503
 
 
@@ -1379,7 +1379,7 @@ def voice_failures_are_quiet_and_quick():
 def voice_flag_off_restores_the_browser_recogniser():
     p, url = start_server(env={"SARVAM_API_KEY": "test-key", "USE_SARVAM_STT": "0"})
     try:
-        assert call("GET", "/api/voice", base=url)[1] == {"sarvam": False}
+        assert call("GET", "/api/voice", base=url)[1]["sarvam"] is False
         assert post_audio(url, tiny_wav())[0] == 503
     finally:
         stop(p)
@@ -1492,6 +1492,89 @@ def planner_flips_back_to_groq_with_one_variable():
         assert not m["planner"].startswith("Sarvam"), m["planner"]
     finally:
         stop(p)
+
+
+# ------------------------------------------------ replies read aloud (Bulbul)
+def fake_bulbul():
+    import base64
+    import http.server
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append({"path": self.path, "key": self.headers.get("api-subscription-key"),
+                         "body": body})
+            if self.path == "/slow":
+                time.sleep(13)
+            if self.path == "/bad":
+                self.send_response(500); self.end_headers(); return
+            out = json.dumps({"audios": [base64.b64encode(tiny_wav()).decode()]}).encode()
+            try:
+                self.send_response(200); self.send_header("Content-Type", "application/json")
+                self.end_headers(); self.wfile.write(out)
+            except OSError:
+                pass
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}", seen
+
+
+def speak(url, text, language):
+    req = urllib.request.Request(url + "/api/tts", method="POST",
+                                 data=json.dumps({"text": text, "language": language}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.headers.get("Content-Type"), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, None, b""
+
+
+@test
+def replies_are_spoken_in_the_shops_language():
+    srv, fake, seen = fake_bulbul()
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "SARVAM_TTS_URL": fake + "/ok"})
+    try:
+        v = call("GET", "/api/voice", base=url)[1]
+        assert v["speak"] and "ta" in v["speak_langs"] and "ur" not in v["speak_langs"], v
+        code, ctype, audio = speak(url, "கிடைத்துவிட்டது", "ta")
+        assert code == 200 and ctype == "audio/wav" and audio[:4] == b"RIFF"
+        assert seen[-1]["key"] == "test-key"
+        assert seen[-1]["body"] == {"text": "கிடைத்துவிட்டது", "target_language_code": "ta-IN",
+                                    "model": "bulbul:v3", "speech_sample_rate": 16000}
+        assert speak(url, "مل گیا", "ur")[0] == 503                # Urdu: text only, quietly
+    finally:
+        stop(p); srv.shutdown()
+
+
+@test
+def spoken_replies_fail_quietly_and_never_hold_up_the_text():
+    srv, fake, _ = fake_bulbul()
+    for path in ("/slow", "/bad"):
+        p, url = start_server(env={"SARVAM_API_KEY": "test-key", "SARVAM_TTS_URL": fake + path})
+        try:
+            t0 = time.perf_counter()
+            assert speak(url, "hello", "en")[0] == 503, path
+            assert time.perf_counter() - t0 < 11.5, path
+        finally:
+            stop(p)
+    srv.shutdown()
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "USE_SARVAM_TTS": "0"})
+    try:
+        assert call("GET", "/api/voice", base=url)[1]["speak"] is False
+        assert speak(url, "hello", "en")[0] == 503
+    finally:
+        stop(p)
+    src = open(os.path.join(HERE, "static", "chat.html"), encoding="utf-8").read()
+    body = src.split("function sayReply(d){")[1].split("\n}")[0]
+    assert body.index("say('house', d.reply)") < body.index("speakReply(d, bubble)")
+    assert "await speakReply" not in src                     # the text never waits for audio
+    server_src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
+    assert 'USE_SARVAM_TTS = os.getenv("USE_SARVAM_TTS", "1") != "0"' in server_src
 
 
 @test
