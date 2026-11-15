@@ -1,0 +1,188 @@
+/* Resolved. — a clearing house, not a dashboard.
+   A disputed payment is a case file. The gate issues a verdict on it.
+   Nothing here loads from the network: the venue wifi is not to be trusted. */
+
+:root{
+  /* Accounting paper, ink, and the three verdicts. Lightness differs as well as
+     hue, so the verdicts are told apart without relying on colour. */
+  --paper:      #EDF0EA;   /* pale ledger stock */
+  --sheet:      #FAFBF7;   /* the case sheet itself */
+  --ink:        #15211C;   /* green-black, a chosen hue not a grey stand-in */
+  --ink-soft:   #55615B;
+  --rule:       #C9CFC4;   /* ruled line */
+  --rule-fine:  #DFE4DA;
+
+  --authority:  #0B3C5D;   /* ink blue: the house's own voice */
+  --authority-w:#E4EDF3;
+
+  --approve:    #0B3C5D;   /* authorised */
+  --hold:       #8A6212;   /* with a person */
+  --refuse:     #8A2B20;   /* refused */
+  --approve-w:  #E4EDF3;
+  --hold-w:     #F6EEDC;
+  --refuse-w:   #F5E3E0;
+
+  /* Two voices: the document, and the interface. Indic faces appended so a
+     Tamil or Hindi reply renders on a plain Windows laptop. */
+  --doc: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino,
+         "Nirmala UI", "Noto Sans Tamil", "Noto Sans Devanagari", serif;
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+        Arial, "Nirmala UI", sans-serif;
+  --num: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", "Segoe UI Mono",
+         Consolas, monospace;
+
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+  --shadow: 0 1px 2px rgba(21,33,28,.06), 0 8px 24px -16px rgba(21,33,28,.3);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font:16px/1.55 var(--ui);
+}
+a{color:var(--authority)}
+:focus-visible{outline:2px solid var(--authority); outline-offset:2px}
+
+/* ---------------------------------------------------------------- masthead */
+.masthead{
+  background:var(--ink); color:var(--sheet);
+  padding:var(--s4) var(--s6);
+  display:flex; align-items:baseline; gap:var(--s5); flex-wrap:wrap;
+  border-bottom:3px solid var(--authority);
+}
+.wordmark{
+  font:600 23px/1 var(--doc); letter-spacing:-.01em; margin:0;
+}
+.wordmark em{font-style:normal; color:#7FB2D0}
+.masthead p{margin:0; font-size:14px; color:#9FB0A8; max-width:52ch}
+.masthead nav{margin-left:auto; display:flex; gap:var(--s5)}
+.masthead nav a{
+  color:#CFE0EA; text-decoration:none; font-size:14px; font-weight:500;
+  padding-bottom:2px; border-bottom:1px solid transparent;
+}
+.masthead nav a:hover{border-bottom-color:#7FB2D0}
+.masthead nav a[aria-current]{color:#fff; border-bottom-color:#7FB2D0}
+
+.page{max-width:1340px; margin:0 auto; padding:var(--s6)}
+@media(max-width:700px){ .page{padding:var(--s4)} .masthead{padding:var(--s4)} }
+
+/* ------------------------------------------------------------------ sheets */
+.sheet{
+  background:var(--sheet); border:1px solid var(--rule); border-radius:3px;
+  box-shadow:var(--shadow);
+}
+.sheet > header{
+  padding:var(--s3) var(--s5); border-bottom:1px solid var(--rule);
+  display:flex; justify-content:space-between; align-items:baseline; gap:var(--s4);
+}
+.sheet > header h2{
+  margin:0; font:600 17px/1.3 var(--doc); letter-spacing:.01em;
+}
+.sheet > header .meta{font-size:13px; color:var(--ink-soft)}
+.sheet .inner{padding:var(--s5)}
+
+/* a ruled field, the way a remittance advice sets one */
+.field{
+  display:flex; gap:var(--s4); padding:var(--s3) 0;
+  border-bottom:1px solid var(--rule-fine); font-size:15px;
+}
+.field:last-child{border-bottom:0}
+.field dt{flex:0 0 180px; color:var(--ink-soft); margin:0}
+.field dd{margin:0; flex:1}
+
+.num{font:inherit; font-family:var(--num); font-variant-numeric:tabular-nums}
+.rupee{font-family:var(--num); font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+
+/* ---------------------------------------------------------------- controls */
+button, .button{
+  font:500 15px/1 var(--ui); padding:11px 18px; border-radius:3px;
+  border:1px solid var(--authority); background:var(--authority); color:#fff;
+  cursor:pointer;
+}
+button:hover{background:#0E4C73}
+button.quiet{background:transparent; color:var(--ink); border-color:var(--rule)}
+button.quiet:hover{border-color:var(--ink-soft)}
+button.danger{background:transparent; color:var(--refuse); border-color:var(--refuse)}
+button[disabled]{opacity:.4; cursor:default}
+
+input[type=text], input[type=number], select, textarea{
+  font:15px/1.4 var(--ui); padding:10px 12px; border-radius:3px;
+  border:1px solid var(--rule); background:#fff; color:var(--ink);
+}
+input[type=text]:focus, select:focus{border-color:var(--authority)}
+label{font-size:14px}
+
+/* ------------------------------------------------------------- the verdict */
+/* The one bold element on the page. A stamp lands on the docket. */
+.stamp{
+  --c:var(--approve);
+  position:relative; display:inline-flex; flex-direction:column; align-items:center;
+  gap:2px; padding:var(--s3) var(--s5);
+  border:3px solid var(--c); border-radius:4px; color:var(--c);
+  font:700 27px/1 var(--doc); letter-spacing:.06em; text-transform:uppercase;
+  transform:rotate(-3deg);
+}
+.stamp small{
+  font:500 11px/1 var(--ui); letter-spacing:.14em; opacity:.8; text-transform:uppercase;
+}
+.stamp.escalate{--c:var(--hold)}
+.stamp.block{--c:var(--refuse)}
+.stamp.landing{animation:land .32s cubic-bezier(.2,1.5,.4,1) both}
+@keyframes land{
+  from{transform:rotate(-3deg) scale(1.9); opacity:0}
+  to  {transform:rotate(-3deg) scale(1);   opacity:1}
+}
+
+/* the five checks, resolving in sequence */
+.checks{list-style:none; margin:var(--s4) 0 0; padding:0; font-size:15px}
+.checks li{
+  display:flex; gap:var(--s3); align-items:flex-start;
+  padding:7px 0; border-bottom:1px solid var(--rule-fine);
+}
+.checks li:last-child{border-bottom:0}
+.checks .no{color:var(--ink-soft); flex:0 0 1.6em; font-family:var(--num)}
+.checks li.pass .mark{color:var(--approve)}
+.checks li.fail{color:var(--refuse); font-weight:500}
+.checks li.fail .mark{color:var(--refuse)}
+.checks .mark{flex:0 0 1em; font-weight:700}
+.checks li.step{animation:settle .22s ease-out both}
+@keyframes settle{from{opacity:0; transform:translateY(-3px)} to{opacity:1; transform:none}}
+
+@media (prefers-reduced-motion: reduce){
+  .stamp.landing, .checks li.step{animation:none}
+  *{transition:none !important}
+}
+
+/* --------------------------------------------------------------- data rows */
+table{width:100%; border-collapse:collapse; font-size:14px}
+thead th{
+  text-align:left; font:500 13px/1.3 var(--ui); color:var(--ink-soft);
+  padding:var(--s2) var(--s3); border-bottom:1px solid var(--rule);
+}
+tbody td{padding:9px var(--s3); border-bottom:1px solid var(--rule-fine); vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.APPROVE{color:var(--approve); font-weight:600}
+td.ESCALATE{color:var(--hold); font-weight:600}
+td.BLOCK{color:var(--refuse); font-weight:600}
+
+.tag{
+  display:inline-block; font:500 12px/1 var(--ui); padding:4px 7px; border-radius:2px;
+  border:1px solid currentColor;
+}
+.tag.ESCALATED{color:var(--hold); background:var(--hold-w)}
+.tag.BLOCKED{color:var(--refuse); background:var(--refuse-w)}
+.tag.NEEDS_INFO{color:var(--ink-soft); background:#EFF1EC}
+.tag.RESOLVED{color:var(--approve); background:var(--approve-w)}
+.tag.FLAGGED{color:var(--refuse); background:#fff; border-style:dashed}
+.tag.TAKEN{color:var(--authority); background:#fff; border-style:dashed}
+
+.quiet-note{color:var(--ink-soft); font-size:14px}
+/* The one warning the demo operator must not miss: data seeded on another day. */
+.stale{background:var(--hold-w); color:var(--hold); border:1px solid var(--hold);
+       border-radius:3px; padding:var(--s3) var(--s4); margin:0 0 var(--s5);
+       font-size:15px; font-weight:500}
+.stale[hidden]{display:none}
+.stale-wrap{padding-bottom:0}
+.stale-wrap:has(.stale[hidden]){display:none}
+.empty{color:var(--ink-soft); font-size:15px; padding:var(--s5); font-family:var(--doc)}

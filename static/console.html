@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resolved. — case desk</title>
+<link rel="icon" type="image/svg+xml" href="/static/mark.svg">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .tally{display:flex; gap:var(--s7); flex-wrap:wrap; padding:var(--s5) 0 var(--s6);
+         border-bottom:1px solid var(--rule)}
+  .tally div b{display:block; font:600 33px/1 var(--doc); font-variant-numeric:tabular-nums}
+  .tally div span{font-size:13px; color:var(--ink-soft)}
+
+  .bands{display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+         gap:var(--s5); padding:var(--s6) 0}
+  .band h3{margin:0 0 var(--s3); font:500 14px/1.3 var(--ui); color:var(--ink-soft)}
+  .ribbon{display:flex; height:22px; border-radius:2px; overflow:hidden; background:#E2E6DE}
+  .ribbon i{display:block}
+  .legend{display:flex; gap:var(--s4); flex-wrap:wrap; margin-top:var(--s3); font-size:13px}
+  .legend span{display:flex; align-items:center; gap:6px; color:var(--ink-soft)}
+  .legend b{width:9px; height:9px; border-radius:1px; display:block}
+  .meter{display:flex; align-items:center; gap:var(--s3); font-size:14px; margin-bottom:6px}
+  .meter .k{width:62px; color:var(--ink-soft)}
+  .meter .t{flex:1; height:8px; background:#E2E6DE; border-radius:4px; overflow:hidden}
+  .meter .t i{display:block; height:100%; background:var(--authority)}
+  .meter .v{width:34px; text-align:right; font-family:var(--num)}
+  .spark{display:flex; align-items:flex-end; gap:2px; height:56px}
+  .spark i{flex:1; background:#7FB2D0; border-radius:1px 1px 0 0; min-height:2px}
+
+  .desk{display:grid; grid-template-columns:360px 1fr; gap:var(--s5); align-items:start}
+  @media(max-width:980px){.desk{grid-template-columns:1fr}}
+  .stack{display:flex; flex-direction:column; gap:var(--s5)}
+
+  .case{padding:var(--s3) var(--s5); border-bottom:1px solid var(--rule-fine); cursor:pointer;
+        display:flex; gap:var(--s3); align-items:baseline}
+  .case:last-child{border-bottom:0}
+  .case:hover{background:#F3F5EF}
+  .case[aria-selected=true]{background:var(--authority-w);
+        box-shadow:inset 3px 0 0 var(--authority)}
+  .case .amt{font:600 16px/1.3 var(--num); font-variant-numeric:tabular-nums}
+  .case .nm{flex:1; font-size:15px}
+  .case .rs{display:block; font-size:13px; color:var(--ink-soft)}
+
+  .verdict-head{display:flex; justify-content:space-between; align-items:flex-start;
+                gap:var(--s5); padding-bottom:var(--s4); border-bottom:2px solid var(--ink)}
+  .verdict-head h3{margin:0; font:600 27px/1.2 var(--doc); font-variant-numeric:tabular-nums}
+  .verdict-head .sub{font-size:14px; color:var(--ink-soft); margin-top:3px}
+  .reported{font-family:var(--doc); font-size:17px; line-height:1.55; margin:var(--s5) 0;
+            padding-left:var(--s4); border-left:3px solid var(--rule)}
+  .proposal{background:var(--authority-w); border:1px solid #BBD3E2; border-radius:3px;
+            padding:var(--s4); margin:var(--s5) 0; font-size:15px}
+  .acts{display:flex; gap:var(--s3); flex-wrap:wrap; margin-top:var(--s5)}
+  .audit-wrap{margin-top:var(--s6)}
+  .audit-wrap td:nth-child(1){font-family:var(--num); color:var(--ink-soft); white-space:nowrap}
+  .audit-wrap td:nth-child(2){font-family:var(--num); white-space:nowrap}
+  .audit-wrap td:nth-child(5){color:var(--ink-soft)}
+  .scroll{max-height:420px; overflow-y:auto}
+  .due{color:var(--hold); font-weight:600}
+  .checks li.knock{color:var(--ink-soft); font-weight:400}
+  .reading{border-left:3px solid var(--hold); background:var(--hold-w); padding:var(--s3) var(--s4);
+           margin:var(--s5) 0 0; font-size:15px; line-height:1.5}
+  .reading.junk{border-left-color:var(--refuse); background:var(--refuse-w)}
+  .reading b{display:block; font-size:13px; font-weight:600; margin-bottom:2px}
+  #detail dl{margin:0}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div>
+    <h1 class="wordmark">Resolved<em>.</em></h1>
+    <p>Cases the agent would not close on its own, and the trail behind every one it did.</p>
+  </div>
+  <nav>
+    <a href="/">Merchant line</a>
+    <a href="/console" aria-current="page">Case desk</a>
+    <a href="/judge">Test it yourself</a>
+  </nav>
+</header>
+
+<main class="page">
+  <p class="stale" id="stale" hidden></p>
+
+  <div class="tally" id="tally"></div>
+  <div class="bands" id="bands"></div>
+
+  <div class="desk">
+    <div class="stack">
+      <section class="sheet">
+        <header><h2>Waiting on you</h2><span class="meta" id="qn"></span></header>
+        <div id="queue"></div>
+      </section>
+      <section class="sheet">
+        <header><h2>Refused by the gate</h2><span class="meta" id="rn"></span></header>
+        <div id="risk"></div>
+      </section>
+      <section class="sheet">
+        <header><h2>Waiting on the shop</h2><span class="meta" id="in"></span></header>
+        <div id="info"></div>
+      </section>
+      <section class="sheet">
+        <header><h2>Override attempts</h2><span class="meta" id="fn"></span></header>
+        <div id="flagged"></div>
+      </section>
+      <section class="sheet">
+        <header><h2>Taken by a person</h2><span class="meta" id="tn"></span></header>
+        <div id="taken"></div>
+      </section>
+    </div>
+
+    <section class="sheet">
+      <header><h2>Case</h2><span class="meta" id="caseMeta"></span></header>
+      <div class="inner" id="detail">
+        <p class="empty">Open a case to see the evidence the agent gathered, which rule
+        stopped it, and what it recommends.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="sheet audit-wrap">
+    <header>
+      <h2>Audit trail</h2>
+      <span class="meta">appended to, never edited &nbsp;·&nbsp;
+        <a href="/api/export/audit.csv">download CSV</a></span>
+    </header>
+    <div class="scroll"><table><thead><tr>
+      <th>Time</th><th>Case</th><th>By</th><th>Event</th><th>Detail</th>
+    </tr></thead><tbody id="audit"></tbody></table></div>
+  </section>
+
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const money = n => n == null ? '—' : '₹' + Number(n).toLocaleString('en-IN');
+/* Where each case went. Same words as the lists below, so the chart and lists agree. */
+const COL = {acted:'#0B3C5D', person:'#8A6212', refused:'#8A2B20', asked:'#8C968F'};
+const SAID = {acted:'acted on alone', person:'sent to a person', refused:'refused',
+              asked:'asked the shop'};
+const KNOCK = ' (only because there was no payment to act on)';
+let rows = [], open = null;
+
+/* RBI T+5: how long is left to put a failed, debited payment back. */
+function clock(rbi){
+  if(!rbi) return null;
+  if(rbi.overdue) return {short:`past T+5 · ₹${Number(rbi.owed)} owed`, due:true,
+    long:`Past the RBI T+5 limit. ₹100 a day is owed to the customer — ₹${Number(rbi.owed)} so far.`};
+  const h = Math.max(0, rbi.hours_left), d = Math.floor(h / 24), r = Math.round(h % 24);
+  const left = d ? `${d} d ${r} h` : `${r} h`;
+  return {short: h < 24 ? `due today · ${left} left` : `${left} to T+5`, due: h < 24,
+    long:`${left} left to reverse it under the RBI T+5 rule (deadline
+      ${new Date(rbi.deadline).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}).
+      After that, ₹100 a day is owed to the customer.`};
+}
+
+async function getJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(url + ' said ' + r.status);
+  return r.json();
+}
+
+async function refresh(){
+  try{
+    rows = await getJSON('/api/queue');
+  }catch(e){
+    $('#qn').textContent = 'not connected'; return;
+  }
+  const pick = st => rows.map((t,i)=>[t,i]).filter(([t]) => t.status === st);
+  const wait = pick('ESCALATED'), blk = pick('BLOCKED'), inf = pick('NEEDS_INFO'),
+        tak = pick('TAKEN'), flg = pick('FLAGGED');
+  $('#fn').textContent = flg.length ? flg.length + ' caught' : 'none';
+  $('#flagged').innerHTML = flg.map(caseRow).join('') ||
+    '<p class="empty">No message has tried to change the rules.</p>';
+  $('#tn').textContent = tak.length ? tak.length + ' being handled' : 'none';
+  $('#taken').innerHTML = tak.map(caseRow).join('') ||
+    '<p class="empty">Nobody has taken a case off the agent.</p>';
+  const due = wait.filter(([t]) => clock(t.rbi) && clock(t.rbi).due).length;
+  $('#qn').textContent = wait.length ? wait.length + ' to decide'
+    + (due ? ` — ${due} due today` : '') : 'clear';
+  $('#rn').textContent = blk.length ? blk.length + ' on record' : 'none';
+  $('#in').textContent = inf.length ? inf.length + ' open' : 'none';
+  $('#queue').innerHTML = wait.map(caseRow).join('') ||
+    '<p class="empty">Nothing needs a person right now.</p>';
+  $('#risk').innerHTML = blk.map(caseRow).join('') ||
+    '<p class="empty">The gate has turned nothing down yet.</p>';
+  $('#info').innerHTML = inf.map(caseRow).join('') ||
+    '<p class="empty">No shop has been asked for more.</p>';
+  document.querySelectorAll('.case').forEach(el =>
+    el.onclick = () => show(rows[+el.dataset.i]));
+
+  try{
+    const m = await getJSON('/api/metrics');
+    drawTally(m); drawBands(m);
+    const a = await getJSON('/api/audit');
+    $('#audit').innerHTML = a.map(r => `<tr>
+      <td>${esc(r.ts.slice(11))}</td><td>${esc(r.ticket_id || '')}</td>
+      <td>${esc(r.actor)}</td><td>${esc(r.event.replace(/_/g,' ').toLowerCase())}</td>
+      <td>${esc(r.detail)}</td></tr>`).join('');
+  }catch(e){ console.warn(e); }
+}
+
+/* The reason a row shows: money pointed at the wrong place (a real check-3 failure) outranks
+   "no payment matches", because it is the one a person must act on. Knock-ons never lead. */
+function mainReason(t){
+  const failed = (t.failed_marked || (t.checks_failed || '').split(' | ')).filter(Boolean)
+    .filter(f => !f.endsWith(KNOCK));
+  const pick = failed.find(f => f.startsWith('3 ')) || failed[0] || '';
+  return pick.replace(/^\d+\s/, '');
+}
+
+function caseRow([t,i]){
+  const c = clock(t.rbi);
+  const reason = t.status === 'FLAGGED' ? 'tried to change the rules; the gate never ruled'
+    : t.override && t.status === 'ESCALATED' && !t.checks_failed
+    ? 'held: the message tried to change the rules'
+    : t.status === 'TAKEN' && t.taken ? `taken by ${t.taken.by}`
+    : t.check4 && t.status === 'ESCALATED'
+    ? (t.check4.kind === 'junk' ? 'check 4 — looks like junk' : 'check 4 — looks real, needs a person')
+    : mainReason(t)
+    || (t.status === 'NEEDS_INFO' ? 'waiting for the shop to answer' : 'needs a look');
+  return `<div class="case" data-i="${i}" aria-selected="${open === t.ticket_id}">
+    <span class="amt">${money(t.claimed_amount)}</span>
+    <span class="nm">${esc(t.merchant_name)}
+      <span class="rs">${esc(reason)}</span>
+      ${c ? `<span class="rs ${c.due ? 'due' : ''}">${esc(c.short)}</span>` : ''}</span>
+    <span class="tag ${esc(t.status)}">${esc(t.status.replace('_',' ').toLowerCase())}</span>
+    ${t.override && t.status !== 'FLAGGED' ? '<span class="tag FLAGGED">override attempt</span>' : ''}
+  </div>`;
+}
+
+function drawTally(m){
+  $('#tally').innerHTML = `
+    <div><b>${Number(m.total)}</b><span>cases ruled by the gate</span></div>
+    <div><b>${Number(m.auto_resolved_pct)}%</b><span>closed without a person</span></div>
+    <div><b>${Number(m.median_ms)}<small style="font-size:16px"> ms</small></b><span>to rule, typically</span></div>
+    <div><b>${money(m.value_moved)}</b><span>moved on the agent's own authority</span></div>
+    <div><b style="font-size:23px;padding-top:7px">${esc(m.planner)}</b><span>deciding today</span></div>`;
+}
+
+function drawBands(m){
+  const total = m.total || 1;
+  const ends = m.by_ending || {};
+  const order = ['acted','person','refused','asked'].filter(k => ends[k]);
+  const checks = Object.entries(m.by_failed_check).sort();
+  const maxC = Math.max(1, ...checks.map(([,v]) => v));
+  const lat = m.latencies || [], maxL = Math.max(1, ...lat);
+  $('#bands').innerHTML = `
+    <div class="band"><h3>How every case ended</h3>
+      <div class="ribbon">${order.map(k =>
+        `<i style="width:${100*ends[k]/total}%;background:${COL[k]}"></i>`).join('')}</div>
+      <div class="legend">${order.map(k =>
+        `<span><b style="background:${COL[k]}"></b>${SAID[k]} — ${Number(ends[k])}</span>`).join('')}</div>
+    </div>
+    <div class="band"><h3>Which rule stopped them <span class="quiet-note">— the deciding
+      check only; knock-on failures are not counted</span></h3>
+      ${checks.length ? checks.map(([k,v]) => `<div class="meter">
+        <span class="k">${esc(k)}</span><span class="t"><i style="width:${100*v/maxC}%"></i></span>
+        <span class="v">${Number(v)}</span></div>`).join('')
+        : '<p class="quiet-note">Nothing has been stopped yet.</p>'}
+    </div>
+    <div class="band"><h3>Time to rule, last ${lat.length} cases</h3>
+      ${!lat.length ? '<p class="quiet-note">No cases yet.</p>'
+        : m.max_ms < 2 ? `<p class="quiet-note">Under a millisecond each — the stand-in
+            planner makes no network call. Start the server with an API key to see real
+            model timings here.</p>`
+        : `<div class="spark">${lat.map(v =>
+            `<i style="height:${Math.max(4,100*v/maxL)}%" title="${Number(v)} ms"></i>`).join('')}</div>
+           <div class="legend"><span>typically ${Number(m.median_ms)} ms</span>
+             <span>slowest ${Number(m.max_ms)} ms</span></div>`}
+    </div>`;
+}
+
+function show(t){
+  open = t.ticket_id;
+  const failed = t.failed_marked || (t.checks_failed || '').split(' | ').filter(Boolean);
+  const passed = (t.checks_passed || '').split(' | ').filter(Boolean);
+  const all = [...passed.map(p => [p,true]), ...failed.map(f => [f,false])]
+    .sort((a,b) => a[0].localeCompare(b[0]));
+  const c = clock(t.rbi);
+  const extra = (() => { try{ return JSON.parse(t.extra || '{}'); }catch(e){ return {}; } })();
+  $('#caseMeta').textContent = `${t.ticket_id} · ruled in ${Number(t.latency_ms)} ms`;
+  $('#detail').innerHTML = `
+    <div class="verdict-head">
+      <div><h3>${money(t.txn_amount || t.claimed_amount)}</h3>
+        <div class="sub">${esc(t.merchant_name)} · opened ${esc(t.created.replace('T',' '))}</div></div>
+      <span class="tag ${esc(t.status)}">${esc(t.status.replace('_',' ').toLowerCase())}</span>
+    </div>
+    <p class="reported">${esc(t.message)}</p>
+    <dl>
+      ${t.utr ? `<div class="field"><dt>Payment</dt><dd><span class="num">${esc(t.utr)}</span>
+        ${t.txn_time ? ' · made ' + esc(t.txn_time.replace('T',' ').slice(0,16)) : ''}
+        ${t.npci_code ? `<br><span class="quiet-note">NPCI code <span class="num">${esc(t.npci_code)}</span>:
+          ${esc(t.npci_meaning)}</span>` : ''}</dd></div>` : ''}
+      ${extra.window ? `<div class="field"><dt>Searched</dt><dd>${esc(extra.window)}</dd></div>` : ''}
+      ${c ? `<div class="field"><dt>RBI clock</dt><dd class="${c.due ? 'due' : ''}">${esc(c.long)}</dd></div>` : ''}
+    </dl>
+    <ol class="checks">${all.map(x => `
+      <li class="${x[1] ? 'pass' : x[0].endsWith(KNOCK) ? 'fail knock' : 'fail'}">
+        <span class="no">${esc(x[0].split(' ')[0])}</span>
+        <span class="mark">${x[1] ? '&#10003;' : '&#10007;'}</span>
+        <span>${esc(x[0].replace(/^\d+\s/,''))}</span></li>`).join('')}
+    </ol>
+    ${t.status === 'FLAGGED' ? '' : `<div class="proposal"><b>The agent would</b>
+      ${t.action === 'NONE' || !t.action ? ' do nothing — it found no payment to act on'
+        : ' ' + esc(t.action.replace(/_/g,' ').toLowerCase())
+          + ' &rarr; <span class="num">' + esc(t.destination || '—') + '</span>'}
+      <br><span class="quiet-note">&ldquo;${esc(t.model_reason || '')}&rdquo;</span></div>`}
+    ${t.status === 'ESCALATED' && t.human_may_approve ? `
+      ${t.override && !t.checks_failed ? `<div class="reading junk"><b>Held: the message tried
+        to change the rules</b>All five checks passed, but the message said
+        &ldquo;${esc(t.override)}&rdquo;, so nothing was done automatically. Read the message
+        before approving.</div>` : ''}
+      <div class="acts">
+        <button data-act="approve">Approve and carry it out</button>
+        <button class="danger" data-act="reject">Turn it down</button>
+      </div>
+      <p class="quiet-note" id="decideNote" style="margin-top:var(--s4)">Approving runs the five
+      checks again on today's facts. You may lift the ceiling or the daily limit, nothing else.
+      Either way, your decision goes on the audit trail.</p>`
+    : t.status === 'ESCALATED' && t.human_may_take ? `
+      <div class="reading ${t.check4.kind}"><b>${t.check4.kind === 'junk'
+          ? 'How this looks: junk' : 'How this looks: a real case'}</b>${esc(t.check4.text)}</div>
+      <div class="acts">
+        <button ${t.check4.kind === 'junk' ? 'class="quiet"' : ''} data-act="take">Take this case</button>
+        <button class="danger" data-act="reject">Turn it down</button>
+      </div>
+      <p class="quiet-note" id="decideNote" style="margin-top:var(--s4)">There is no approve
+      button: the gate ruled that this action is not allowed here, and a person cannot lift
+      check 4. <b>Take this case</b> moves it off the agent and onto you, to settle through the
+      back office; nothing moves from this screen. <b>Turn it down</b> closes it. The reading
+      above comes from what the agent proposed, so it is a guide, not a ruling. Read the
+      message. Either way, your decision goes on the audit trail.</p>`
+    : t.status === 'ESCALATED' ? `
+      <div class="acts"><button class="danger" data-act="reject">Turn it down</button></div>
+      <p class="quiet-note" id="decideNote" style="margin-top:var(--s4)">This was held on a rule a
+      person cannot lift here (${esc(failed.map(f => 'check ' + f[0]).join(', '))}), so there is no
+      approve button. Turn it down, or fix the fact and raise it again.</p>`
+    : t.status === 'FLAGGED' ? `
+      <p class="quiet-note"><b>Caught: this message tried to change the rules</b>
+      (&ldquo;${esc(t.override)}&rdquo;). It asked for nothing that could be checked, so no
+      action was proposed and the gate never ruled. Nothing moved. The shop was told the
+      checks cannot be changed from a message.</p>`
+    : t.status === 'TAKEN' ? `
+      <p class="quiet-note"><b>Taken by ${esc(t.taken ? t.taken.by : 'a person')}${t.taken
+        ? ' at ' + esc(t.taken.at.replace('T', ' ').slice(0, 16)) : ''}.</b> The agent will not
+      act on it again. It is being settled outside this system, so nothing here moved money.
+      ${c ? 'The RBI clock above still runs.' : ''}</p>`
+    : t.status === 'NEEDS_INFO' ? `
+      <p class="quiet-note">There was not enough to act on. The shop has been asked for the
+      missing detail; the case reopens when they answer.</p>`
+    : `<p class="quiet-note"><b>The gate turned this down, and there is no override here.</b>
+       A refusal means the facts are wrong — the wrong payment, or money pointed somewhere
+       it must not go. Fix the fact, not the ruling: get the UTR from the customer, or
+       verify the account through the usual channel, and the case can be raised again.</p>`}`;
+  document.querySelectorAll('#detail [data-act]').forEach(b =>
+    b.onclick = () => decide(t.ticket_id, b.dataset.act));
+  document.querySelectorAll('.case').forEach(el =>
+    el.setAttribute('aria-selected', rows[+el.dataset.i].ticket_id === open));
+}
+
+async function decide(id, d){
+  document.querySelectorAll('#detail [data-act]').forEach(b => b.disabled = true);
+  let ok = false, why = '';
+  try{
+    const r = await fetch(`/api/queue/${encodeURIComponent(id)}/decide`, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({decision:d})});
+    const body = await r.json();
+    ok = r.ok; why = body.detail || '';
+  }catch(e){ why = 'the server is not answering'; }
+  open = null;
+  $('#caseMeta').textContent = '';
+  $('#detail').innerHTML = ok
+    ? `<p class="empty">Case ${esc(id)} ${d === 'approve' ? 'approved and carried out'
+        : d === 'take' ? 'is yours now, under “Taken by a person”'
+        : 'turned down'}. It is on the audit trail below.</p>`
+    : `<p class="empty">Case ${esc(id)} was not changed: ${esc(why)}.</p>`;
+  refresh();
+}
+
+
+async function staleCheck(){
+  try{
+    const r = await fetch('/api/stats'); if(!r.ok) return;
+    const s = await r.json();
+    const el = document.querySelector('#stale');
+    el.hidden = !s.stale;
+    el.textContent = s.stale ? `The demo data was seeded on ${s.seeded_on || 'an unknown day'},
+      not today, so lines like "yesterday" will miss. Stop the server, run python seed.py,
+      and start it again.` : '';
+  }catch(e){}
+}
+staleCheck();
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
