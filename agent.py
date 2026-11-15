@@ -106,12 +106,49 @@ def groq_model() -> str:
 REDTEAM = False          # set by evaluate.py / the server; the CLI uses --redteam
 
 
-def ask(prompt: str, system: str | None = None, model: str | None = None) -> str:
-    """One call to whichever provider has a key. `system` lets the live server use its
-    reading prompt; the suites keep the original planning prompt."""
+# ----------------------------------------------------------------- Sarvam
+# One line to flip the model back to Groq at the venue:  set PLANNER=groq  (then restart).
+PLANNER = os.getenv("PLANNER", "sarvam")
+SARVAM_MODEL = os.getenv("SARVAM_MODEL", "sarvam-105b")
+SARVAM_CHAT_URL = "https://api.sarvam.ai/v2/chat/completions"
+
+
+def sarvam_key() -> str | None:
+    """From the environment, then the user's saved settings (Windows). Never from a file.
+    Set-but-empty means deliberately no key (the tests rely on that)."""
+    key = os.environ.get("SARVAM_API_KEY")
+    if key is None and os.name == "nt":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+                key = winreg.QueryValueEx(k, "SARVAM_API_KEY")[0]
+        except OSError:
+            key = None
+    return key.strip().strip("%").strip() if key else None
+
+
+def use_sarvam() -> bool:
+    return PLANNER == "sarvam" and bool(sarvam_key())
+
+
+def ask(prompt: str, system: str | None = None, model: str | None = None,
+        timeout: float = 30) -> str:
+    """One call to whichever provider is in use. `system` lets the live server use its
+    reading prompt; the suites keep the original planning prompt. `model` is a Groq model id
+    and is ignored by the other providers."""
     system = system or (SYSTEM_REDTEAM if (REDTEAM or "--redteam" in sys.argv) else SYSTEM)
     if "--stub" in sys.argv:
         return '{"action": "MARK_PAID", "utr": null, "destination": "STUB", "reason": "stub"}'
+    if use_sarvam():
+        # Thinking switched off: with it on, sarvam-105b spent 1,300-2,000 reasoning tokens
+        # and ~9 s per call (measured 15 Nov); with "none", ~1.2 s and the same answer.
+        body = {"model": SARVAM_MODEL, "temperature": 0, "max_tokens": 600,
+                "reasoning_effort": "none",
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": prompt}]}
+        req = urllib.request.Request(SARVAM_CHAT_URL, data=json.dumps(body).encode(), headers={
+            "api-subscription-key": sarvam_key(), "Content-Type": "application/json", **UA})
+        return json.load(urllib.request.urlopen(req, timeout=timeout))["choices"][0]["message"]["content"] or ""
     if os.getenv("ANTHROPIC_API_KEY"):
         body = {"model": os.getenv("MODEL", "claude-haiku-4-5"), "max_tokens": 300,
                 "system": system, "messages": [{"role": "user", "content": prompt}]}
@@ -119,7 +156,7 @@ def ask(prompt: str, system: str | None = None, model: str | None = None) -> str
             data=json.dumps(body).encode(), headers={
                 "x-api-key": os.environ["ANTHROPIC_API_KEY"],
                 "anthropic-version": "2023-06-01", "content-type": "application/json", **UA})
-        return json.load(urllib.request.urlopen(req, timeout=60))["content"][0]["text"]
+        return json.load(urllib.request.urlopen(req, timeout=timeout))["content"][0]["text"]
     if os.getenv("GROQ_API_KEY"):
         default = groq_model()
         body = {"model": model if model and model in _GROQ_IDS else default, "temperature": 0,
@@ -129,7 +166,7 @@ def ask(prompt: str, system: str | None = None, model: str | None = None) -> str
             data=json.dumps(body).encode(), headers={
                 "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}",
                 "content-type": "application/json", **UA})
-        return json.load(urllib.request.urlopen(req, timeout=60))["choices"][0]["message"]["content"]
+        return json.load(urllib.request.urlopen(req, timeout=timeout))["choices"][0]["message"]["content"]
     if os.getenv("GEMINI_API_KEY"):
         model = os.getenv("MODEL", "gemini-2.5-flash")
         body = {"systemInstruction": {"parts": [{"text": system}]},
@@ -139,7 +176,7 @@ def ask(prompt: str, system: str | None = None, model: str | None = None) -> str
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             f"?key={os.environ['GEMINI_API_KEY']}",
             data=json.dumps(body).encode(), headers={"content-type": "application/json", **UA})
-        return json.load(urllib.request.urlopen(req, timeout=60))["candidates"][0]["content"]["parts"][0]["text"]
+        return json.load(urllib.request.urlopen(req, timeout=timeout))["candidates"][0]["content"]["parts"][0]["text"]
     sys.exit("Set ANTHROPIC_API_KEY, GROQ_API_KEY or GEMINI_API_KEY (or use --stub).")
 
 

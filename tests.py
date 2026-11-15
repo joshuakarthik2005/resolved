@@ -1017,7 +1017,7 @@ def model_server(body: str):
         "import os, json\n"
         "os.environ['GROQ_API_KEY'] = 'test-not-a-real-key'\n"
         "import agent\n" + body +
-        "\ndef _ask(prompt, system=None, model=None):\n"
+        "\ndef _ask(prompt, system=None, model=None, timeout=30):\n"
         "    assert system == agent.SYSTEM_READ and model == agent.READ_MODEL\n"
         "    return _answer(json.loads(prompt))\n"
         "agent.ask = _ask\n"))
@@ -1391,6 +1391,107 @@ def voice_flag_off_restores_the_browser_recogniser():
     assert "$('#mic').hidden = true" in src                  # no voice at all: no mic
     server_src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
     assert 'USE_SARVAM_STT = os.getenv("USE_SARVAM_STT", "1") != "0"' in server_src
+
+
+# --------------------------------------------- the model is Sarvam; Groq one switch away
+def fake_sarvam_chat(content: str):
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            H.last = body
+            out = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.end_headers(); self.wfile.write(out)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/v2/chat/completions"
+
+
+@test
+def sarvam_answers_are_read_and_bad_ones_fall_back():
+    # exactly the shape sarvam-105b returned live: JSON inside a ```json fence
+    fenced = ("```json\n" + json.dumps({"reading": {"amount": 1890, "utr": None,
+              "destination": None, "intent": "dispute", "duplicate": False},
+              "action": "REVERSE_TO_SOURCE", "utr": "UTR300000000002",
+              "destination": "CUST-551907", "reason": "failed, reverse"}) + "\n```")
+    for content, reader in ((fenced, "model"), ("I think you should refund it.", "regex-fallback")):
+        reseed()
+        srv, chat = fake_sarvam_chat(content)
+        p, url = start_server(env={"SARVAM_API_KEY": "test-key", "PLANNER": "sarvam"},
+                              extra=f"import agent\nagent.SARVAM_CHAT_URL = {chat!r}\n")
+        try:
+            d = ticket("M002", ANU, url)
+            assert d["reader"] == reader, (reader, d["reader"])
+            assert (d["outcome"], d["action"]) == ("APPROVE", "REVERSE_TO_SOURCE"), d
+            assert call("GET", "/api/metrics", base=url)[1]["planner"] == "Sarvam sarvam-105b"
+        finally:
+            stop(p); srv.shutdown()
+
+
+@test
+def a_hanging_model_falls_back_within_seconds():
+    """Seen live: two Sarvam calls hung for 30 s. The live call is capped; the regex takes over."""
+    import http.server
+
+    class Hang(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            time.sleep(12)
+            try:
+                self.send_response(500); self.end_headers()
+            except OSError:
+                pass
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hang)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    chat = f"http://127.0.0.1:{srv.server_address[1]}/v2/chat/completions"
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "PLANNER": "sarvam"},
+                          extra=f"import agent\nagent.SARVAM_CHAT_URL = {chat!r}\n")
+    try:
+        t0 = time.perf_counter()
+        d = ticket("M002", ANU, url)
+        took = time.perf_counter() - t0
+        assert took < 8, took
+        assert d["reader"] == "regex-fallback" and d["outcome"] == "APPROVE", d
+    finally:
+        stop(p); srv.shutdown()
+
+
+@test
+def the_model_cannot_turn_a_complaint_into_a_question():
+    """Seen live: Sarvam read 'a customer paid me twice, please refund one' as not a dispute."""
+    p, url = model_server("""
+def _answer(p):
+    return json.dumps({'reading': {'amount': None, 'utr': None, 'destination': None,
+                                   'intent': 'other', 'duplicate': True},
+                       'action': 'NONE', 'utr': None, 'destination': None, 'reason': 'unsure'})
+""")
+    try:
+        q1 = ticket("M005", "a customer paid me twice by mistake, please refund one", url)
+        assert q1["kind"] == "ask" and q1["ask"] == "ASK_AMOUNT", q1
+        assert ticket("M005", "how does settlement work", url)["kind"] == "help"
+    finally:
+        stop(p)
+
+
+@test
+def planner_flips_back_to_groq_with_one_variable():
+    import agent
+    src = open(os.path.join(HERE, "agent.py"), encoding="utf-8").read()
+    assert 'PLANNER = os.getenv("PLANNER", "sarvam")' in src
+    assert 'os.getenv("GROQ_API_KEY")' in src                 # the Groq path is still there
+    p, url = start_server(env={"SARVAM_API_KEY": "test-key", "PLANNER": "groq"})
+    try:
+        _, m = call("GET", "/api/metrics", base=url)
+        assert not m["planner"].startswith("Sarvam"), m["planner"]
+    finally:
+        stop(p)
 
 
 @test

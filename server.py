@@ -479,8 +479,10 @@ def classify(message: str, facts: dict) -> str:
         return "ask"                 # we could not read it cleanly; ask, never guess
     if facts["amount"] or facts["utr"]:
         return "dispute"
-    if facts.get("intent"):                       # the model read it
-        return "ask" if facts["intent"] == "dispute" else "help"
+    # The model may turn a vague message INTO a complaint, never the other way round: seen
+    # live, Sarvam called "a customer paid me twice, please refund one" not a dispute.
+    if facts.get("intent") == "dispute":
+        return "ask"
     if HELP_WORDS.search(message) or not DISPUTE_WORDS.search(message):
         return "help"
     return "ask"                     # a dispute, but no amount: ask for it
@@ -488,7 +490,19 @@ def classify(message: str, facts: dict) -> str:
 
 # ------------------------------------------------------------ propose step
 def have_key() -> bool:
-    return any(os.getenv(k) for k in ("GROQ_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"))
+    import agent
+    return agent.use_sarvam() or any(
+        os.getenv(k) for k in ("GROQ_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"))
+
+
+def model_name() -> str:
+    """Which model is deciding, for the case desk and the logs."""
+    import agent
+    if agent.use_sarvam():
+        return f"Sarvam {agent.SARVAM_MODEL}"
+    if os.getenv("GROQ_API_KEY"):
+        return "Groq"
+    return "real model" if have_key() else "stand-in"
 
 
 def propose(facts: dict, matches: list[dict], merchant: dict) -> dict:
@@ -586,6 +600,11 @@ def _valid_reading(raw: str) -> tuple[dict, dict] | None:
         return None
 
 
+# The live model call gives up after this, and the regex reading takes over silently. Seen
+# live on 15 Nov: two Sarvam calls hung for the full 30 s; a judge must never wait that long.
+MODEL_TIMEOUT_S = 6
+
+
 def read_and_propose(message: str, merchant: dict, candidates: list[dict]):
     """One model call: what the message says, and one proposed action. None on any failure."""
     try:
@@ -598,7 +617,8 @@ def read_and_propose(message: str, merchant: dict, candidates: list[dict]):
                         "customer_source_account": c["source_account"]} for c in candidates]}
         return _valid_reading(agent.ask(json.dumps(payload, ensure_ascii=False,
                                                    separators=(",", ":")),
-                                        system=agent.SYSTEM_READ, model=agent.READ_MODEL))
+                                        system=agent.SYSTEM_READ, model=agent.READ_MODEL,
+                                        timeout=MODEL_TIMEOUT_S))
     except Exception as exc:                               # keep the demo alive
         print(f"[reader] model unavailable, using the regex reading: {exc!r}")
         return None
@@ -1459,16 +1479,8 @@ STT_MAX_BYTES = 1_500_000    # ~45 s of 16 kHz mono WAV; Sarvam's REST limit is 
 
 
 def sarvam_key() -> str | None:
-    # Only from the environment (process, then the user's saved settings), never from a file.
-    key = os.environ.get("SARVAM_API_KEY")         # set but empty = deliberately no key
-    if key is None and os.name == "nt":
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
-                key = winreg.QueryValueEx(k, "SARVAM_API_KEY")[0]
-        except OSError:
-            key = None
-    return key.strip().strip("%").strip() if key else None
+    import agent                                    # one place reads the key
+    return agent.sarvam_key()
 
 
 @app.get("/api/voice")
@@ -1790,7 +1802,7 @@ def metrics():
         "max_ms": lat[-1] if lat else 0,
         "latencies": lat[-40:],
         "value_moved": moved,
-        "planner": "real model" if have_key() else "stand-in",
+        "planner": model_name(),
     }
 
 
@@ -1829,5 +1841,7 @@ if __name__ == "__main__":
         print("  Lines like 'yesterday' will miss. Stop this, run:  python seed.py")
         print("!" * 74)
     print(f"Resolved. running on http://127.0.0.1:{port}     console: /console")
-    print("planner:", "real LLM" if have_key() else "stand-in (set GROQ_API_KEY for the model)")
+    print("planner:", model_name() if have_key() else
+          "stand-in (set SARVAM_API_KEY or GROQ_API_KEY for a model)",
+          "  - to use Groq instead:  set PLANNER=groq" if model_name().startswith("Sarvam") else "")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

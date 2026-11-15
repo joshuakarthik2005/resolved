@@ -123,8 +123,9 @@ Breaking one of these makes the deck a lie on stage. Check before you refactor.
   Never use a model-reported confidence score for an authorisation decision.
 - **"0 of 900 risky tickets approved"** — reproduce with `python evaluate.py`.
 - **"3/3 bad proposals stopped"** — reproduce with `python agent.py --redteam`.
-- **"About 0.8 s to rule, live"** — measured 14 Nov through the live pipeline with the model
-  reading AND proposing (`gpt-oss-20b`, `agent.READ_MODEL`): median 821 / 834 / 827 ms over
+- **"About 1-1.5 s to rule, live, on Sarvam"** — see "The model" below. Before the switch,
+  on Groq (`gpt-oss-20b`, `agent.READ_MODEL`), measured 14 Nov through the live pipeline with
+  the model reading AND proposing: median 821 / 834 / 827 ms over
   three paced runs of the 10 demo-path messages, max 2-3 s on the first call. Reproduce
   with the bench script described under "Reading". The suites below still use 120b.
 - **"0.8 s median decision, 1.6 s slowest"** — from `python agent.py --redteam` with Groq
@@ -207,6 +208,26 @@ gate refused a genuine refund). The new case shows "carries on from T…"; the q
 Unchanged and separate: a UTR sent after "two payments match — send me the UTR" carries that
 case forward (demo step 3); that is matched by the payment, not by memory.
 
+## The model: Sarvam sarvam-105b, Groq one switch away (15 Nov)
+
+`agent.PLANNER` defaults to `sarvam` (`sarvam-105b` via `https://api.sarvam.ai/v2/chat/completions`,
+OpenAI-style). **To flip back to Groq at the venue: `set PLANNER=groq`, then restart.** The
+Groq path is untouched (it still needs `GROQ_API_KEY`). Key: `SARVAM_API_KEY` from the
+environment or the user's saved settings, never a file.
+- **Thinking is switched off** (`reasoning_effort: "none"`). With it on, sarvam-105b spent
+  1,300-2,000 reasoning tokens and ~9 s per call; off, ~1.2 s and the same answers.
+- **Live calls are capped at 6 s** (`MODEL_TIMEOUT_S`), then the regex reading takes over
+  silently. Seen live: two Sarvam calls hung for the full 30 s before the cap existed.
+- **The model may make a vague message a complaint, never the reverse** (seen live: Sarvam
+  called "a customer paid me twice, please refund one" not a dispute).
+- It wraps its JSON in a ```json fence; the parser takes the first {...} block, so fine.
+- Measured 15 Nov on sarvam-105b: generator 1,838/2,000, 900/900 risky stopped, 0 unsafe;
+  model suite 10/12 (both misses over-cautious daily-cap holds), 0 unsafe; red-team 12/12,
+  3/3 bad proposals stopped, 0 moved wrongly; **live time to rule median 1.05-1.5 s** over
+  three runs (slowest single 1.6-3.3 s). Groq/gpt-oss-20b was 0.75-0.83 s — faster.
+- `sarvam-105b-conversations` answered our prompt in ~0.4 s in one probe; not adopted
+  (sarvam-105b was asked for). Worth trying if the venue makes 105b feel slow.
+
 ## Voice: Sarvam speech to text (15 Nov)
 
 The mic records a 16 kHz WAV in the browser and posts it to our `/api/stt`, which forwards it
@@ -246,7 +267,7 @@ than hiding it.
 Pages: `/` merchant chat · `/console` human console · `/judge` judge mode
 
 Before every rehearsal and before the jury: `python seed.py` (resets data) and
-`python tests.py` (70 tests, ~100 s).
+`python tests.py` (74 tests, ~110 s).
 
 **Stale data guard.** The ledger is seeded relative to the day `seed.py` ran, and the demo
 lines say "yesterday" and "5 days ago". On any other day step 1 misses. So: the seed date
